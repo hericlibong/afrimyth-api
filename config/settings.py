@@ -10,7 +10,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import django_stubs_ext
 from dotenv import load_dotenv
+from rest_framework.generics import GenericAPIView
+from rest_framework.serializers import BaseSerializer
+
+# Les classes génériques de Django et de DRF ne le sont que pour les stubs.
+# Ce correctif les rend indexables à l'exécution, afin que le code puisse être
+# annoté — `ModelAdmin[Entity]`, `ModelSerializer[Entity]` — sous mypy strict.
+django_stubs_ext.monkeypatch(extra_classes=[BaseSerializer, GenericAPIView])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

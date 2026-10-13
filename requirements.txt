@@ -1,4 +1,5 @@
 Django~=5.2.18
+django-stubs-ext~=6.1
 djangorestframework~=3.16.1
 psycopg[binary]~=3.2
 python-dotenv~=1.0
