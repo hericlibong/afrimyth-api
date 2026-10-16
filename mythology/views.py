@@ -26,10 +26,19 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     lookup_field = "slug"
 
     def get_queryset(self) -> QuerySet[Entity]:
-        """Ne joint le profil que pour le détail, qui est seul à l'exposer."""
+        """Ne joint les profils que pour le détail, seul à les exposer.
+
+        Les trois relations `OneToOne` sont chargées dans la même requête :
+        une entité n'en possède qu'une, mais le serializer de détail interroge
+        les trois pour produire un contrat de clés stable.
+        """
         queryset = Entity.objects.all()
         if self.action == "retrieve":
-            return queryset.select_related("divinity_profile")
+            return queryset.select_related(
+                "divinity_profile",
+                "hero_profile",
+                "creature_profile",
+            )
         return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer[Entity]]:

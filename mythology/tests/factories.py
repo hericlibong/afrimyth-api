@@ -6,7 +6,14 @@ encore petit et la phase 2 le fera évoluer.
 
 from typing import Any
 
-from mythology.models import DivinityProfile, Entity, EntityType, Gender
+from mythology.models import (
+    CreatureProfile,
+    DivinityProfile,
+    Entity,
+    EntityType,
+    Gender,
+    HeroProfile,
+)
 
 
 def create_entity(
@@ -29,3 +36,23 @@ def create_entity(
 def create_divinity_profile(entity: Entity, **extra: Any) -> DivinityProfile:
     """Crée un profil de divinité rattaché à `entity`."""
     return DivinityProfile.objects.create(entity=entity, **extra)
+
+
+def create_hero(name: str = "Soundiata", slug: str = "soundiata") -> Entity:
+    """Crée une entité de type `hero`."""
+    return create_entity(name=name, slug=slug, entity_type=EntityType.HERO)
+
+
+def create_creature(name: str = "Mokele-mbembe", slug: str = "mokele-mbembe") -> Entity:
+    """Crée une entité de type `creature`."""
+    return create_entity(name=name, slug=slug, entity_type=EntityType.CREATURE)
+
+
+def create_hero_profile(entity: Entity, **extra: Any) -> HeroProfile:
+    """Crée un profil de héros rattaché à `entity`."""
+    return HeroProfile.objects.create(entity=entity, **extra)
+
+
+def create_creature_profile(entity: Entity, **extra: Any) -> CreatureProfile:
+    """Crée un profil de créature rattaché à `entity`."""
+    return CreatureProfile.objects.create(entity=entity, **extra)

@@ -8,7 +8,7 @@ arriveront avec le CRUD de la phase 4.
 
 from rest_framework import serializers
 
-from mythology.models import DivinityProfile, Entity
+from mythology.models import CreatureProfile, DivinityProfile, Entity, HeroProfile
 
 
 class DivinityProfileSerializer(serializers.ModelSerializer[DivinityProfile]):
@@ -25,6 +25,41 @@ class DivinityProfileSerializer(serializers.ModelSerializer[DivinityProfile]):
         ]
 
 
+class HeroProfileSerializer(serializers.ModelSerializer[HeroProfile]):
+    """Profil de héros, imbriqué dans le détail d'une entité."""
+
+    class Meta:
+        model = HeroProfile
+        fields = [
+            "titles",
+            "achievements",
+            "quests",
+            "weapons_or_artifacts",
+            "legacy",
+            "historical_context",
+        ]
+
+
+class CreatureProfileSerializer(serializers.ModelSerializer[CreatureProfile]):
+    """Profil de créature, imbriqué dans le détail d'une entité."""
+
+    class Meta:
+        model = CreatureProfile
+        fields = [
+            "habitat",
+            "powers",
+            "strengths",
+            "weaknesses",
+            "encounter_omens",
+            "encounter_rules",
+            "known_sightings",
+            "diet",
+            "size",
+            "appearance_notes",
+            "threat_level",
+        ]
+
+
 class EntityListSerializer(serializers.ModelSerializer[Entity]):
     """Représentation compacte, suffisante pour afficher une collection."""
 
@@ -36,12 +71,15 @@ class EntityListSerializer(serializers.ModelSerializer[Entity]):
 class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
     """Représentation détaillée, profil métier inclus lorsqu'il existe.
 
-    `divinity_profile` vaut `null` pour une entité qui n'a pas de profil, ce
-    qui est le cas des héros et des créatures tant que leurs profils
-    n'existent pas.
+    Les trois clés de profil sont **toujours présentes** : celle qui
+    correspond au type porte l'objet, les deux autres valent `null`. Un
+    contrat de clés stable évite au client de tester l'existence d'une clé en
+    plus de sa valeur, et rend la réponse lisible quel que soit le type.
     """
 
     divinity_profile = DivinityProfileSerializer(read_only=True)
+    hero_profile = HeroProfileSerializer(read_only=True)
+    creature_profile = CreatureProfileSerializer(read_only=True)
 
     class Meta:
         model = Entity
@@ -64,4 +102,6 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
             "created_at",
             "updated_at",
             "divinity_profile",
+            "hero_profile",
+            "creature_profile",
         ]

@@ -6,3 +6,4 @@ ruff~=0.6.9
 mypy~=1.11
 django-stubs[compatible-mypy]~=5.2.0
 djangorestframework-stubs~=3.16
+ipython~=9.17

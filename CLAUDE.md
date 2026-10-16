@@ -5,15 +5,19 @@ Instructions pour les agents Claude travaillant sur `afrimyth-api`.
 ## Nature du projet
 
 API REST Django (Python 3.12, Django 5.2 LTS, Django REST Framework,
-PostgreSQL) pour le projet Afrimyth. Le dépôt est au tout début de la phase 1 :
-seul le socle technique existe.
+PostgreSQL) pour le projet Afrimyth.
+
+La phase 1 est terminée : socle technique, modèle utilisateur personnalisé,
+endpoint de santé, tronc commun `Entity`, premier profil `DivinityProfile`,
+administration Django et API de lecture liste/détail. La phase 2 complète
+progressivement le modèle métier, incrément par incrément.
 
 ## Structure
 
 ```
 config/        Projet Django (settings, urls, wsgi/asgi, vues techniques)
 accounts/      Utilisateurs et authentification — contient le modèle `User`
-mythology/     Domaine mythologique — aucun modèle pour l'instant
+mythology/     Domaine mythologique — `Entity` et ses profils métier
 tests/         Tests transverses (socle, endpoints techniques)
 docs/reports/  Rapport d'intervention, un fichier par incrément
 ```
@@ -21,7 +25,8 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 ## Règles de travail
 
 - **Périmètre.** N'implémente que ce qui est demandé. Ne devance pas la
-  roadmap : à ce stade, `Entity` et les profils métier ne doivent pas exister.
+  roadmap : le modèle métier se complète un incrément à la fois, et chaque
+  incrément nomme explicitement ce qu'il laisse de côté.
 - **Pas d'abstraction anticipée.** Pas de couche service/repository, pas de
   `BaseModel` générique, pas de mixins spéculatifs. Du Django idiomatique.
 - **Configuration.** Toute valeur dépendante de l'environnement passe par une
@@ -38,13 +43,35 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
   décisions prises, commandes de vérification et leurs résultats, blocages
   rencontrés et leur résolution, état Git final. Aucun secret, aucune valeur de
   `.env`, aucun mot de passe n'y figure.
-- **Langue.** Code et identifiants en anglais ; commentaires, docstrings et
-  documentation en français.
+- **Langue.** Le français est la langue de travail interne, l'anglais celle du
+  produit public. Décision complète dans l'ADR 0003 du dépôt de pilotage.
+  - **En anglais** — identifiants du code ; `README.md` et toute documentation
+    publique ; contrat d'API : noms de champs, valeurs techniques,
+    descriptions et messages destinés aux clients ; futur schéma OpenAPI et
+    ses interfaces Swagger ou ReDoc ; contenu canonique du corpus, y compris
+    les noms et les descriptions importés.
+  - **En français** — commentaires et docstrings internes ; prompts ; rapports
+    de `docs/reports/` ; documentation interne.
+  - **Aucune internationalisation n'est ajoutée à ce stade** : pas de tables de
+    traduction, pas de champs suffixés par langue, pas de `gettext` sur les
+    chaînes publiques.
+  - Ne traduis pas les fichiers sources existants au passage. Les libellés
+    encore en français et techniquement visibles — `verbose_name`, libellés de
+    choix, `help_text`, messages d'erreur de `clean()` — sont une dette connue,
+    inscrite dans la roadmap, à normaliser avant la stabilisation du contrat
+    public.
 
 ## Hors périmètre à ce stade
 
-Docker, CI, authentification JWT, génération d'images, et tout contenu issu
-d'un dossier `_audit` (à ne jamais recopier).
+Docker, CI, authentification JWT, et tout contenu issu d'un dossier `_audit`
+(à ne jamais recopier).
+
+**Rendu visuel et génération d'images.** Les modèles ne portent que des faits
+mythologiques. Les données de rendu — prompt canonique, variantes de prompt,
+prompt négatif, styles visuels, matrice de styles et métadonnées d'image, de
+son ou de vidéo — restent hors des incréments en cours et vivront dans leur
+propre module, après la V1. N'ajoute aucun champ `prompt` à `Entity` ni à ses
+profils.
 
 ## Commandes
 
