@@ -1,19 +1,23 @@
 """Modèles du domaine mythologique.
 
-Cet incrément pose le tronc commun `Entity` et le premier profil métier
-`DivinityProfile`. Les référentiels (pays, ethnies, aires culturelles,
-domaines), les deux autres profils, les relations entre entités, le workflow
-éditorial et les données de rendu visuel appartiennent aux phases suivantes de
-la roadmap.
+Contenu actuel : le tronc commun `Entity`, ses trois profils métier
+(`DivinityProfile`, `HeroProfile`, `CreatureProfile`) et les quatre
+référentiels validés (`CulturalArea`, `Country`, `Ethnicity`, `Domain`).
+
+Restent à venir : `variant_of`, `EntityRelation`, `Source`, le workflow
+éditorial et les champs de suppression logique. Les données de rendu visuel
+sont hors V1, conformément à la section 8 de l'ADR 0002.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import F, Q
 
 
 class EntityType(models.TextChoices):
@@ -47,6 +51,19 @@ class ThreatLevel(models.TextChoices):
     MYTHIC = "mythic", "Mythique"
 
 
+class CulturalAreaKind(models.TextChoices):
+    """Nature d'une aire culturelle.
+
+    Les trois valeurs décrivent des phénomènes distincts, conformément à la
+    décision 3 de l'ADR 0002 : une aire interne au continent, une portée
+    transrégionale, et une transmission hors d'Afrique.
+    """
+
+    AFRICAN_REGION = "african_region", "African region"
+    TRANSREGIONAL = "transregional", "Transregional"
+    DIASPORIC = "diasporic", "Diasporic"
+
+
 def string_array() -> ArrayField[list[str], list[str]]:
     """Construit un `ArrayField` de courtes chaînes, vide par défaut.
 
@@ -73,12 +90,190 @@ def wrong_entity_type_error(profile_label: str, expected: str) -> ValidationErro
     )
 
 
+class CulturalArea(models.Model):
+    """Aire culturelle : région africaine, portée transrégionale ou diaspora.
+
+    Référentiel, et jamais un type d'entité ni un profil métier. C'est ici que
+    sont classées les valeurs comme `Congo Basin`, `Pan-African` ou une
+    destination diasporique, que la décision 2 de l'ADR 0002 refuse d'inscrire
+    dans `Country`.
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True)
+    kind = models.CharField(max_length=20, choices=CulturalAreaKind.choices)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="children",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "aire culturelle"
+        verbose_name_plural = "aires culturelles"
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(parent=F("id")),
+                name="cultural_area_parent_is_not_self",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def clean(self) -> None:
+        """Interdit qu'une aire soit son propre parent direct.
+
+        La règle est aussi posée en base par `cultural_area_parent_is_not_self`
+        ; ce `clean()` n'existe que pour produire un message lisible dans les
+        formulaires plutôt qu'une `IntegrityError`.
+
+        Aucune détection des cycles indirects — A → B → A — n'est tentée : ce
+        serait un moteur d'arbre, hors du périmètre de cet incrément.
+        """
+        super().clean()
+        if self.parent_id is not None and self.parent_id == self.pk:
+            raise ValidationError(
+                {"parent": "A cultural area cannot be its own parent."}
+            )
+
+
+class Country(models.Model):
+    """Pays réel, identifié par son nom et son code ISO alpha-2 facultatif.
+
+    Ne contient que de véritables pays : `Pan-African`, `Congo Basin` et
+    `Diaspora` relèvent de `CulturalArea`, conformément à la décision 2 de
+    l'ADR 0002.
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True)
+    # Code facultatif représenté par la chaîne vide plutôt que par `NULL` :
+    # une seule représentation de l'absence, et pas de `null=True` sur un
+    # champ textuel. L'unicité est donc portée par une contrainte
+    # conditionnelle qui ignore les codes non renseignés, ce qui autorise
+    # autant de pays sans code que nécessaire.
+    iso_code = models.CharField(max_length=2, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "pays"
+        verbose_name_plural = "pays"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["iso_code"],
+                condition=~Q(iso_code=""),
+                name="unique_country_iso_code_when_set",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args: object, **kwargs: object) -> None:
+        """Normalise le code ISO lors d'un enregistrement par `save()`.
+
+        Placé ici plutôt que dans `clean()` seul, afin que la normalisation
+        s'applique aussi à un `objects.create()` direct.
+        `update()` et les opérations en masse contournent cette méthode.
+        """
+        self.iso_code = self.normalized_iso_code()
+        super().save(*args, **kwargs)  # type: ignore[arg-type]
+
+    def normalized_iso_code(self) -> str:
+        """Retourne le code ISO sans espaces superflus et en majuscules."""
+        return self.iso_code.strip().upper()
+
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        """Normalise le code avant les validateurs de champ et de longueur."""
+        if not exclude or "iso_code" not in exclude:
+            self.iso_code = self.normalized_iso_code()
+        super().clean_fields(exclude=exclude)
+
+    def clean(self) -> None:
+        """Normalise le code ISO puis en valide le format.
+
+        La normalisation est répétée ici pour qu'un code saisi en minuscules
+        dans un formulaire soit accepté au lieu d'être rejeté par le contrôle
+        qui suit. Le contrôle de format, lui, n'est appliqué que par
+        `full_clean()` : `objects.create(iso_code="X1")` passerait, la seule
+        barrière de base étant la longueur maximale de deux caractères.
+        """
+        super().clean()
+        self.iso_code = self.normalized_iso_code()
+        if self.iso_code and (
+            len(self.iso_code) != 2
+            or not all("A" <= letter <= "Z" for letter in self.iso_code)
+        ):
+            raise ValidationError(
+                {"iso_code": "ISO code must be exactly two letters from A to Z."}
+            )
+
+
+class Ethnicity(models.Model):
+    """Ethnie, ancrage culturel principal d'une figure.
+
+    `primary_cultural_area` situe l'ethnie sans dupliquer les aires portées
+    par l'entité elle-même.
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True)
+    primary_cultural_area = models.ForeignKey(
+        CulturalArea,
+        on_delete=models.PROTECT,
+        related_name="ethnicities",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "ethnie"
+        verbose_name_plural = "ethnies"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Domain(models.Model):
+    """Domaine d'attribution, partagé par les trois types d'entités.
+
+    Emplacement unique des domaines, conformément à la décision 4 de
+    l'ADR 0002 : aucun doublon dans les profils propres aux types.
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "domaine"
+        verbose_name_plural = "domaines"
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Entity(models.Model):
     """Tronc commun à toutes les figures mythologiques.
 
     Porte les faits réutilisables quel que soit le type : identification,
     récit, apparence et attributs symboliques. Les données propres à un type
     vivent dans un profil relié en `OneToOne`.
+
+    **Règle non encore appliquée.** L'ADR 0002 veut qu'une même valeur ne soit
+    pas à la fois ancrage principal et rattachement secondaire — par exemple
+    un pays présent dans `primary_country` et dans `secondary_countries`.
+    Cette règle n'est volontairement imposée nulle part ici. Un
+    `Model.clean()` ne la couvrirait pas : les sélections plusieurs-à-plusieurs
+    de l'administration sont enregistrées après la validation de l'instance,
+    si bien qu'une nouvelle valeur secondaire échapperait au contrôle. Aucun
+    signal global n'est ajouté pour autant. Son application appartiendra aux
+    services d'import et d'écriture, avant l'ouverture du CRUD.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -100,6 +295,56 @@ class Entity(models.Model):
     power_objects = string_array()
     symbolic_animals = string_array()
     manifestations = models.TextField(blank=True)
+
+    # --- Rattachements aux référentiels ---------------------------------
+    #
+    # Chaque dimension géographique ou culturelle se décline en un ancrage
+    # principal facultatif et une collection de rattachements secondaires,
+    # conformément aux décisions 1, 2 et 3 de l'ADR 0002. `PROTECT` sur les
+    # clés principales empêche de supprimer un référentiel encore utilisé
+    # comme ancrage.
+    #
+    # Les clés étrangères sont indexées par Django : aucun index manuel n'est
+    # ajouté. Aucune table de liaison explicite non plus, les relations
+    # multiples ne portant aucune donnée propre.
+    primary_country = models.ForeignKey(
+        Country,
+        on_delete=models.PROTECT,
+        related_name="entities_as_primary_country",
+        null=True,
+        blank=True,
+    )
+    secondary_countries = models.ManyToManyField(
+        Country,
+        related_name="entities_as_secondary_country",
+        blank=True,
+    )
+    primary_ethnicity = models.ForeignKey(
+        Ethnicity,
+        on_delete=models.PROTECT,
+        related_name="entities_as_primary_ethnicity",
+        null=True,
+        blank=True,
+    )
+    secondary_ethnicities = models.ManyToManyField(
+        Ethnicity,
+        related_name="entities_as_secondary_ethnicity",
+        blank=True,
+    )
+    primary_cultural_area = models.ForeignKey(
+        CulturalArea,
+        on_delete=models.PROTECT,
+        related_name="entities_as_primary_area",
+        null=True,
+        blank=True,
+    )
+    secondary_cultural_areas = models.ManyToManyField(
+        CulturalArea,
+        related_name="entities_as_secondary_area",
+        blank=True,
+    )
+    domains = models.ManyToManyField(Domain, related_name="entities", blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

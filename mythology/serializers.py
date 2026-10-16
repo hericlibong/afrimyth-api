@@ -8,7 +8,58 @@ arriveront avec le CRUD de la phase 4.
 
 from rest_framework import serializers
 
-from mythology.models import CreatureProfile, DivinityProfile, Entity, HeroProfile
+from mythology.models import (
+    Country,
+    CreatureProfile,
+    CulturalArea,
+    DivinityProfile,
+    Domain,
+    Entity,
+    Ethnicity,
+    HeroProfile,
+)
+
+
+class CountrySerializer(serializers.ModelSerializer[Country]):
+    """Identité d'un pays : socle commun plus son code ISO."""
+
+    class Meta:
+        model = Country
+        fields = ["id", "slug", "name", "iso_code"]
+
+
+class CulturalAreaSerializer(serializers.ModelSerializer[CulturalArea]):
+    """Identité d'une aire culturelle : socle commun plus sa nature.
+
+    `parent` et `children` ne sont pas imbriqués : les exposer ici
+    déclencherait une cascade de sérialisation et des requêtes sans rapport
+    avec la lecture d'une entité.
+    """
+
+    class Meta:
+        model = CulturalArea
+        fields = ["id", "slug", "name", "kind"]
+
+
+class EthnicitySerializer(serializers.ModelSerializer[Ethnicity]):
+    """Identité d'une ethnie, réduite au socle commun.
+
+    `primary_cultural_area` est volontairement absent : l'aire de l'entité
+    elle-même est déjà exposée, et imbriquer celle de son ethnie ajouterait un
+    niveau de graphe sans besoin client établi.
+    """
+
+    class Meta:
+        model = Ethnicity
+        fields = ["id", "slug", "name"]
+
+
+class DomainSerializer(serializers.ModelSerializer[Domain]):
+    """Identité d'un domaine, réduite au socle commun."""
+
+    class Meta:
+        model = Domain
+        fields = ["id", "slug", "name"]
 
 
 class DivinityProfileSerializer(serializers.ModelSerializer[DivinityProfile]):
@@ -81,6 +132,14 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
     hero_profile = HeroProfileSerializer(read_only=True)
     creature_profile = CreatureProfileSerializer(read_only=True)
 
+    primary_country = CountrySerializer(read_only=True)
+    secondary_countries = CountrySerializer(many=True, read_only=True)
+    primary_ethnicity = EthnicitySerializer(read_only=True)
+    secondary_ethnicities = EthnicitySerializer(many=True, read_only=True)
+    primary_cultural_area = CulturalAreaSerializer(read_only=True)
+    secondary_cultural_areas = CulturalAreaSerializer(many=True, read_only=True)
+    domains = DomainSerializer(many=True, read_only=True)
+
     class Meta:
         model = Entity
         fields = [
@@ -99,6 +158,13 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
             "power_objects",
             "symbolic_animals",
             "manifestations",
+            "primary_country",
+            "secondary_countries",
+            "primary_ethnicity",
+            "secondary_ethnicities",
+            "primary_cultural_area",
+            "secondary_cultural_areas",
+            "domains",
             "created_at",
             "updated_at",
             "divinity_profile",
