@@ -6,12 +6,12 @@ transitions de modération validées dans l'ADR 0002 arrivent en phase 4, et le
 filtrage sur le statut éditorial avec eux.
 """
 
-from django.db.models import QuerySet
+from django.db.models import Prefetch, QuerySet
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny
 from rest_framework.serializers import BaseSerializer
 
-from mythology.models import Entity
+from mythology.models import Entity, EntityRelation
 from mythology.serializers import EntityDetailSerializer, EntityListSerializer
 
 
@@ -26,12 +26,17 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     lookup_field = "slug"
 
     def get_queryset(self) -> QuerySet[Entity]:
-        """Ne joint profils et référentiels que pour le détail.
+        """Ne joint profils, référentiels et liens que pour le détail.
 
-        Le détail charge en une requête les trois profils `OneToOne` et les
-        trois ancrages principaux, puis une requête par collection multiple.
-        La liste n'expose ni profils ni référentiels : son queryset reste nu,
-        ce qui évite de payer sept jointures pour une réponse compacte.
+        Le détail charge en une requête les trois profils `OneToOne`, les
+        trois ancrages principaux et la figure de référence, puis une requête
+        par collection préchargée. Les relations sortantes sont préchargées
+        avec leur cible jointe : une seule requête supplémentaire, quel que
+        soit le nombre de liens.
+
+        La liste n'expose ni profils, ni référentiels, ni relations : son
+        queryset reste nu, ce qui évite de payer ces jointures pour une
+        réponse compacte.
         """
         queryset = Entity.objects.all()
         if self.action == "retrieve":
@@ -42,11 +47,16 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
                 "primary_country",
                 "primary_ethnicity",
                 "primary_cultural_area",
+                "variant_of",
             ).prefetch_related(
                 "secondary_countries",
                 "secondary_ethnicities",
                 "secondary_cultural_areas",
                 "domains",
+                Prefetch(
+                    "relations_from",
+                    queryset=EntityRelation.objects.select_related("to_entity"),
+                ),
             )
         return queryset
 

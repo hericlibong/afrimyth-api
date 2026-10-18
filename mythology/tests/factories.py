@@ -14,10 +14,12 @@ from mythology.models import (
     DivinityProfile,
     Domain,
     Entity,
+    EntityRelation,
     EntityType,
     Ethnicity,
     Gender,
     HeroProfile,
+    RelationKind,
 )
 
 
@@ -99,3 +101,24 @@ def create_domain(
 ) -> Domain:
     """Crée un domaine."""
     return Domain.objects.create(name=name, slug=slug, **extra)
+
+
+def create_relation(
+    from_entity: Entity,
+    kind: str = RelationKind.PARENT,
+    to_entity: Entity | None = None,
+    to_name: str = "",
+    **extra: Any,
+) -> EntityRelation:
+    """Crée un lien sortant, vers une fiche ou vers un simple nom.
+
+    Rappel du sens : `from_entity — kind → cible` se lit « la cible est un
+    `kind` de `from_entity` ».
+    """
+    return EntityRelation.objects.create(
+        from_entity=from_entity,
+        kind=kind,
+        to_entity=to_entity,
+        to_name=to_name,
+        **extra,
+    )

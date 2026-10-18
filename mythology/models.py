@@ -1,12 +1,14 @@
 """Modèles du domaine mythologique.
 
-Contenu actuel : le tronc commun `Entity`, ses trois profils métier
-(`DivinityProfile`, `HeroProfile`, `CreatureProfile`) et les quatre
-référentiels validés (`CulturalArea`, `Country`, `Ethnicity`, `Domain`).
+Contenu actuel : le tronc commun `Entity` — avec sa variante éventuelle
+(`variant_of`) —, ses trois profils métier (`DivinityProfile`, `HeroProfile`,
+`CreatureProfile`), les quatre référentiels validés (`CulturalArea`,
+`Country`, `Ethnicity`, `Domain`) et les liens entre figures
+(`EntityRelation`).
 
-Restent à venir : `variant_of`, `EntityRelation`, `Source`, le workflow
-éditorial et les champs de suppression logique. Les données de rendu visuel
-sont hors V1, conformément à la section 8 de l'ADR 0002.
+Restent à venir : `Source`, le workflow éditorial et les champs de suppression
+logique. Les données de rendu visuel sont hors V1, conformément à la section 8
+de l'ADR 0002.
 """
 
 from __future__ import annotations
@@ -62,6 +64,20 @@ class CulturalAreaKind(models.TextChoices):
     AFRICAN_REGION = "african_region", "African region"
     TRANSREGIONAL = "transregional", "Transregional"
     DIASPORIC = "diasporic", "Diasporic"
+
+
+class RelationKind(models.TextChoices):
+    """Nature d'un lien entre deux figures.
+
+    Le libellé qualifie toujours la **cible** du lien, lu depuis la source :
+    `parent` signifie « la cible est un parent de la source ».
+    """
+
+    PARENT = "parent", "Parent"
+    CHILD = "child", "Child"
+    CONSORT = "consort", "Consort"
+    ALLY = "ally", "Ally"
+    ENEMY = "enemy", "Enemy"
 
 
 def string_array() -> ArrayField[list[str], list[str]]:
@@ -345,6 +361,22 @@ class Entity(models.Model):
     )
     domains = models.ManyToManyField(Domain, related_name="entities", blank=True)
 
+    # Variante culturelle d'une figure de référence, au sens de la décision 3
+    # de l'ADR 0002. La variante reste une entité autonome : rien n'est hérité
+    # ni recopié depuis la référence, et son `entity_type` peut différer du
+    # sien — une forme régionale peut être une créature là où la référence est
+    # une divinité. Aucune contrainte d'égalité des types n'est donc posée.
+    #
+    # `PROTECT` interdit la suppression physique d'une figure encore citée
+    # comme référence.
+    variant_of = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="variants",
+        null=True,
+        blank=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -356,12 +388,33 @@ class Entity(models.Model):
             models.UniqueConstraint(
                 fields=["name", "entity_type"],
                 name="unique_entity_name_per_type",
-            )
+            ),
+            models.CheckConstraint(
+                condition=~Q(variant_of=F("id")),
+                name="entity_variant_of_is_not_self",
+            ),
         ]
         indexes = [models.Index(fields=["entity_type"], name="entity_type_idx")]
 
     def __str__(self) -> str:
         return self.name
+
+    def clean(self) -> None:
+        """Interdit qu'une entité soit sa propre figure de référence.
+
+        La règle est garantie en base par `entity_variant_of_is_not_self` ; ce
+        `clean()` n'existe que pour produire un message lisible dans un
+        formulaire plutôt qu'une `IntegrityError`.
+
+        Les cycles indirects — A variante de B, B variante de A — ne sont
+        **pas** détectés : il faudrait un parcours récursif, hors du périmètre
+        de cet incrément.
+        """
+        super().clean()
+        if self.variant_of_id is not None and self.variant_of_id == self.pk:
+            raise ValidationError(
+                {"variant_of": "An entity cannot be a variant of itself."}
+            )
 
 
 class DivinityProfile(models.Model):
@@ -496,3 +549,113 @@ class CreatureProfile(models.Model):
             and self.entity.entity_type != EntityType.CREATURE
         ):
             raise wrong_entity_type_error("profil de créature", EntityType.CREATURE)
+
+
+class EntityRelation(models.Model):
+    """Lien orienté entre une figure et une autre, résolue ou simplement citée.
+
+    **Sens de lecture.** Le lien se lit toujours depuis `from_entity`, et
+    `kind` qualifie la cible :
+
+    - `A — parent → B` signifie « B est un parent de A » ;
+    - `A — child → B` signifie « B est un enfant de A ».
+
+    Ce sens doit être respecté à l'import : l'inverser transformerait une
+    ascendance en descendance. Un descendant lointain n'est jamais converti en
+    enfant direct ; les cas ambigus seront signalés par le rapport d'import.
+
+    **Cible résolue ou citée.** Sur les 44 entités du corpus V2, les noms
+    cités dans `relations` désignent souvent des figures absentes. Exiger une
+    cible existante perdrait l'information ; `to_name` conserve donc le nom
+    brut. Une fois la fiche créée, le lien pourra être résolu explicitement. Aucun
+    rapprochement par nom n'est tenté : les noms sont culturellement ambigus
+    et une fusion automatique de fiches serait une perte de donnée.
+
+    **Aucune relation inverse n'est créée.** `parent` n'engendre pas de
+    `child`, et une alliance n'engendre pas sa réciproque : une seule ligne
+    est écrite, celle que l'on a saisie.
+    """
+
+    from_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name="relations_from",
+    )
+    to_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name="relations_to",
+        null=True,
+        blank=True,
+    )
+    to_name = models.CharField(max_length=255, blank=True)
+    kind = models.CharField(max_length=20, choices=RelationKind.choices)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["kind", "to_name", "id"]
+        verbose_name = "relation entre entités"
+        verbose_name_plural = "relations entre entités"
+        constraints = [
+            # Exactement une cible : soit la fiche, soit le nom, jamais les
+            # deux ni aucune.
+            models.CheckConstraint(
+                condition=(
+                    Q(to_entity__isnull=False, to_name="")
+                    | Q(to_entity__isnull=True) & ~Q(to_name="")
+                ),
+                name="entity_relation_exactly_one_target",
+            ),
+            models.CheckConstraint(
+                condition=~Q(to_entity=F("from_entity")),
+                name="entity_relation_target_is_not_source",
+            ),
+            # Deux unicités complémentaires : l'une pour les liens résolus,
+            # l'autre pour les liens cités. Une paire de figures peut porter
+            # plusieurs types de relation, seul le triplet est unique.
+            models.UniqueConstraint(
+                fields=["from_entity", "to_entity", "kind"],
+                condition=Q(to_entity__isnull=False),
+                name="unique_resolved_relation",
+            ),
+            models.UniqueConstraint(
+                fields=["from_entity", "to_name", "kind"],
+                condition=Q(to_entity__isnull=True),
+                name="unique_unresolved_relation",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = self.to_entity.name if self.to_entity is not None else self.to_name
+        return f"{self.from_entity.name} — {self.kind} → {target}"
+
+    def clean(self) -> None:
+        """Valide la cible, en doublant les contraintes d'un message lisible.
+
+        Les trois règles ci-dessous sont garanties en base par les
+        `CheckConstraint` ; ce `clean()` les rejoue pour que l'administration
+        affiche une erreur de formulaire au lieu d'une `IntegrityError`. La
+        quatrième — un nom composé uniquement d'espaces — n'existe qu'ici :
+        `"   "` n'est pas la chaîne vide, donc la contrainte de base le
+        laisserait passer.
+        """
+        super().clean()
+        self.to_name = self.to_name.strip()
+
+        if self.to_entity_id is not None and self.to_name:
+            raise ValidationError(
+                {
+                    "to_name": (
+                        "Leave the target name empty when a target entity is "
+                        "selected."
+                    )
+                }
+            )
+        if self.to_entity_id is None and not self.to_name:
+            raise ValidationError(
+                {"to_name": ("Provide either a target entity or a target name.")}
+            )
+        if self.to_entity_id is not None and self.to_entity_id == self.from_entity_id:
+            raise ValidationError(
+                {"to_entity": "An entity cannot be related to itself."}
+            )

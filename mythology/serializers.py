@@ -15,9 +15,38 @@ from mythology.models import (
     DivinityProfile,
     Domain,
     Entity,
+    EntityRelation,
     Ethnicity,
     HeroProfile,
 )
+
+
+class EntityReferenceSerializer(serializers.ModelSerializer[Entity]):
+    """Référence synthétique vers une entité.
+
+    Volontairement limitée à quatre champs : imbriquer le détail d'une cible
+    ferait repartir la sérialisation dans ses propres relations, donc une
+    récursion. Le client obtient un `slug` suffisant pour aller chercher la
+    fiche complète s'il en a besoin.
+    """
+
+    class Meta:
+        model = Entity
+        fields = ["id", "slug", "name", "entity_type"]
+
+
+class EntityRelationSerializer(serializers.ModelSerializer[EntityRelation]):
+    """Relation sortante d'une entité.
+
+    `to_entity` porte la cible résolue, `to_name` le nom brut d'une figure
+    sans fiche. Exactement l'un des deux est renseigné.
+    """
+
+    to_entity = EntityReferenceSerializer(read_only=True)
+
+    class Meta:
+        model = EntityRelation
+        fields = ["id", "kind", "to_entity", "to_name", "notes"]
 
 
 class CountrySerializer(serializers.ModelSerializer[Country]):
@@ -140,6 +169,17 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
     secondary_cultural_areas = CulturalAreaSerializer(many=True, read_only=True)
     domains = DomainSerializer(many=True, read_only=True)
 
+    variant_of = EntityReferenceSerializer(read_only=True)
+    # Seules les relations sortantes sont exposées. Les relations entrantes
+    # — `relations_to` — et les variantes inverses viendront si un besoin
+    # client le justifie ; les ajouter maintenant doublerait la charge utile
+    # sans usage établi.
+    relations = EntityRelationSerializer(
+        many=True,
+        read_only=True,
+        source="relations_from",
+    )
+
     class Meta:
         model = Entity
         fields = [
@@ -165,6 +205,8 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
             "primary_cultural_area",
             "secondary_cultural_areas",
             "domains",
+            "variant_of",
+            "relations",
             "created_at",
             "updated_at",
             "divinity_profile",

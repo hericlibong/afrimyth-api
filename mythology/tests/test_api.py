@@ -5,7 +5,13 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from mythology.models import CulturalAreaKind, Entity, EntityType, ThreatLevel
+from mythology.models import (
+    CulturalAreaKind,
+    Entity,
+    EntityType,
+    RelationKind,
+    ThreatLevel,
+)
 from mythology.serializers import EntityDetailSerializer
 from mythology.tests.factories import (
     create_country,
@@ -18,6 +24,7 @@ from mythology.tests.factories import (
     create_ethnicity,
     create_hero,
     create_hero_profile,
+    create_relation,
 )
 from mythology.views import EntityViewSet
 
@@ -193,6 +200,124 @@ def test_detail_n_imbrique_pas_le_graphe_des_referentiels(client: Client) -> Non
     assert "primary_cultural_area" not in payload["primary_ethnicity"]
 
 
+def test_liste_n_expose_ni_variante_ni_relations(client: Client) -> None:
+    """Le contrat de la collection reste strictement inchangé."""
+    reference = create_entity(name="Mami Wata", slug="mami-wata")
+    variante = create_entity(
+        name="Mami Wata (Caribbean)",
+        slug="mami-wata-caribbean",
+        variant_of=reference,
+    )
+    create_relation(variante, RelationKind.PARENT, to_name="Yemoja")
+
+    response = client.get(reverse("entity-list"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    for item in payload:
+        assert set(item) == {"id", "slug", "name", "entity_type", "category"}
+
+
+def test_detail_expose_la_figure_de_reference(client: Client) -> None:
+    """`variant_of` est une référence synthétique à quatre champs."""
+    reference = create_creature(name="Mami Wata", slug="mami-wata")
+    variante = create_entity(
+        name="Mami Wata (Vodun)",
+        slug="mami-wata-vodun",
+        variant_of=reference,
+    )
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": variante.slug}))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload["variant_of"]) == {"id", "slug", "name", "entity_type"}
+    assert payload["variant_of"]["slug"] == "mami-wata"
+    # Le type de la référence peut différer de celui de la variante.
+    assert payload["variant_of"]["entity_type"] == EntityType.CREATURE
+    assert payload["entity_type"] == EntityType.DIVINITY
+
+
+def test_detail_sans_variante_ni_relation(client: Client) -> None:
+    """Sans lien : `variant_of` vaut `null` et `relations` est vide."""
+    entity = create_entity()
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["variant_of"] is None
+    assert payload["relations"] == []
+
+
+def test_detail_expose_les_relations_sortantes(client: Client) -> None:
+    """Chaque relation porte `id`, `kind`, `to_entity`, `to_name`, `notes`.
+
+    Une cible résolue conserve `to_name=""` ; une cible absente porte son nom
+    et `to_entity=null`.
+    """
+    source = create_entity(name="Shango", slug="shango")
+    cible = create_entity(name="Oranyan", slug="oranyan")
+    create_relation(
+        source,
+        RelationKind.PARENT,
+        to_entity=cible,
+        notes="Lignée royale d'Oyo.",
+    )
+    create_relation(source, RelationKind.ENEMY, to_name="Figure sans fiche")
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": source.slug}))
+
+    assert response.status_code == 200
+    relations = response.json()["relations"]
+    assert len(relations) == 2
+    for relation in relations:
+        assert set(relation) == {"id", "kind", "to_entity", "to_name", "notes"}
+
+    # Ordre déterministe : `kind` d'abord, donc `enemy` avant `parent`.
+    non_resolue, resolue = relations
+    assert non_resolue["kind"] == RelationKind.ENEMY
+    assert non_resolue["to_entity"] is None
+    assert non_resolue["to_name"] == "Figure sans fiche"
+    assert resolue["kind"] == RelationKind.PARENT
+    assert resolue["to_name"] == ""
+    assert resolue["notes"] == "Lignée royale d'Oyo."
+    assert set(resolue["to_entity"]) == {"id", "slug", "name", "entity_type"}
+    assert resolue["to_entity"]["name"] == "Oranyan"
+
+
+def test_detail_n_imbrique_pas_le_detail_des_cibles(client: Client) -> None:
+    """Les cibles restent synthétiques : aucune récursion possible.
+
+    Si la cible était sérialisée en détail, elle exposerait à son tour ses
+    propres `relations` et `variant_of`, et la réponse partirait en cascade.
+    """
+    source = create_entity(name="A", slug="a")
+    cible = create_entity(name="B", slug="b", variant_of=source)
+    create_relation(source, RelationKind.ALLY, to_entity=cible)
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": source.slug}))
+
+    cible_json = response.json()["relations"][0]["to_entity"]
+    assert "relations" not in cible_json
+    assert "variant_of" not in cible_json
+    assert "story_description" not in cible_json
+
+
+def test_detail_n_expose_pas_les_relations_entrantes(client: Client) -> None:
+    """Seules les relations sortantes figurent dans la réponse."""
+    source = create_entity(name="A", slug="a")
+    cible = create_entity(name="B", slug="b")
+    create_relation(source, RelationKind.PARENT, to_entity=cible)
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": cible.slug}))
+
+    payload = response.json()
+    assert payload["relations"] == []
+    assert "relations_to" not in payload
+
+
 def test_detail_imbrique_le_profil_de_divinite(client: Client) -> None:
     """Le détail expose les champs communs et le profil quand il existe."""
     entity = create_entity(
@@ -288,12 +413,13 @@ def test_detail_a_un_cout_constant_quel_que_soit_le_type(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail coûte 5 requêtes pour chacun des trois types.
+    """Le détail coûte 6 requêtes pour chacun des trois types.
 
-    Les trois profils et les trois ancrages principaux sont joints à la
-    requête de l'entité par `select_related` ; les quatre requêtes restantes
-    sont celles des `prefetch_related`, que Django exécute même lorsque les
-    collections sont vides.
+    Les trois profils, les trois ancrages principaux et la figure de
+    référence sont joints à la requête de l'entité par `select_related` ; les
+    cinq requêtes restantes sont celles des préchargements — quatre
+    collections de référentiels et les relations sortantes — que Django
+    exécute même lorsque les collections sont vides.
 
     Ce que le test protège : qu'aucun profil ne déclenche de requête
     supplémentaire, et que le coût ne dépende pas du type de l'entité.
@@ -306,7 +432,7 @@ def test_detail_a_un_cout_constant_quel_que_soit_le_type(
     create_creature_profile(creature)
 
     for entity in (divinity, hero, creature):
-        with django_assert_num_queries(5):
+        with django_assert_num_queries(6):
             client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
 
 
@@ -314,24 +440,34 @@ def test_detail_entierement_relie_ne_provoque_pas_de_n_plus_un(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail d'une entité entièrement rattachée coûte 5 requêtes.
+    """Le détail d'une entité entièrement rattachée coûte 6 requêtes.
 
     Décompte : 1 requête pour l'entité, qui ramène par `select_related` les
-    trois profils et les trois ancrages principaux, puis 1 requête par
-    collection `prefetch_related` — pays, ethnies et aires secondaires, et
-    domaines.
+    trois profils, les trois ancrages principaux et la figure de référence,
+    puis 1 requête par collection préchargée — pays, ethnies et aires
+    secondaires, domaines, et relations sortantes. Les trois relations
+    coûtent une seule requête, leur cible étant jointe dans le `Prefetch`.
 
     Ce test fixe le budget global de requêtes du détail. À lui seul, il ne
     prouve pas le préchargement : une collection non préchargée demande aussi
     une seule requête pour cette unique entité, quel que soit son contenu.
+    C'est `test_detail_precharge_se_serialise_sans_requete` qui apporte cette
+    preuve.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
+    entity.variant_of = create_entity(name="Référence", slug="reference")
+    entity.save()
+    cible = create_entity(name="Oranyan", slug="oranyan")
+    create_relation(entity, RelationKind.PARENT, to_entity=cible)
+    create_relation(entity, RelationKind.CONSORT, to_entity=create_hero())
+    create_relation(entity, RelationKind.ENEMY, to_name="Figure sans fiche")
 
-    with django_assert_num_queries(5):
+    with django_assert_num_queries(6):
         response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
 
     assert response.status_code == 200
+    assert len(response.json()["relations"]) == 3
 
 
 def test_detail_precharge_se_serialise_sans_requete(
@@ -340,10 +476,24 @@ def test_detail_precharge_se_serialise_sans_requete(
     """Le queryset de la vue fournit toutes les données au serializer.
 
     Retirer un préchargement provoque une requête pendant la sérialisation,
-    même si le budget global de l'endpoint reste identique.
+    même si le budget global de l'endpoint reste identique. C'est donc ce
+    test, et non le budget, qui prouve la présence de chaque préchargement.
+
+    Le jeu couvre une figure de référence, deux relations résolues — dont les
+    cibles doivent elles aussi être jointes — et une cible absente.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
+    entity.variant_of = create_entity(name="Référence", slug="reference")
+    entity.save()
+    create_relation(
+        entity,
+        RelationKind.PARENT,
+        to_entity=create_entity(name="Oranyan", slug="oranyan"),
+    )
+    create_relation(entity, RelationKind.CONSORT, to_entity=create_hero())
+    create_relation(entity, RelationKind.ENEMY, to_name="Figure sans fiche")
+
     view = EntityViewSet()
     view.action = "retrieve"
     loaded = view.get_queryset().get(pk=entity.pk)
@@ -353,6 +503,15 @@ def test_detail_precharge_se_serialise_sans_requete(
 
     assert len(payload["secondary_countries"]) == 2
     assert len(payload["domains"]) == 2
+    assert payload["variant_of"]["slug"] == "reference"
+    assert len(payload["relations"]) == 3
+    # Les noms des cibles résolues sont lus sans requête supplémentaire :
+    # c'est ce que garantit le `select_related("to_entity")` du `Prefetch`.
+    assert [
+        relation["to_entity"]["name"]
+        for relation in payload["relations"]
+        if relation["to_entity"] is not None
+    ] == ["Soundiata", "Oranyan"]
 
 
 def test_slug_inconnu_renvoie_404(client: Client) -> None:

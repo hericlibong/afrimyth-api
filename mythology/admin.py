@@ -7,6 +7,7 @@ from mythology.models import (
     DivinityProfile,
     Domain,
     Entity,
+    EntityRelation,
     Ethnicity,
     HeroProfile,
 )
@@ -66,6 +67,7 @@ class EntityAdmin(admin.ModelAdmin[Entity]):
         "primary_country",
         "primary_ethnicity",
         "primary_cultural_area",
+        "variant_of",
     ]
     filter_horizontal = [
         "secondary_countries",
@@ -73,6 +75,15 @@ class EntityAdmin(admin.ModelAdmin[Entity]):
         "secondary_cultural_areas",
         "domains",
     ]
+
+
+@admin.register(EntityRelation)
+class EntityRelationAdmin(admin.ModelAdmin[EntityRelation]):
+    list_display = ["from_entity", "kind", "to_entity", "to_name"]
+    list_filter = ["kind"]
+    search_fields = ["from_entity__name", "to_entity__name", "to_name"]
+    autocomplete_fields = ["from_entity", "to_entity"]
+    list_select_related = ["from_entity", "to_entity"]
 
 
 @admin.register(DivinityProfile)
