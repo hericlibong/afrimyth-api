@@ -10,6 +10,7 @@ from mythology.models import (
     EntityRelation,
     Ethnicity,
     HeroProfile,
+    Source,
 )
 
 
@@ -84,6 +85,15 @@ class EntityRelationAdmin(admin.ModelAdmin[EntityRelation]):
     search_fields = ["from_entity__name", "to_entity__name", "to_name"]
     autocomplete_fields = ["from_entity", "to_entity"]
     list_select_related = ["from_entity", "to_entity"]
+
+
+@admin.register(Source)
+class SourceAdmin(admin.ModelAdmin[Source]):
+    list_display = ["label", "entity", "kind", "accessed_at"]
+    list_filter = ["kind"]
+    search_fields = ["label", "entity__name"]
+    autocomplete_fields = ["entity"]
+    list_select_related = ["entity"]
 
 
 @admin.register(DivinityProfile)

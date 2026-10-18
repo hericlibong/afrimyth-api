@@ -18,7 +18,19 @@ from mythology.models import (
     EntityRelation,
     Ethnicity,
     HeroProfile,
+    Source,
 )
+
+
+class SourceSerializer(serializers.ModelSerializer[Source]):
+    """Référence documentaire, imbriquée dans le détail d'une entité.
+
+    `entity` n'est pas réexposé : la source est déjà lue depuis sa fiche.
+    """
+
+    class Meta:
+        model = Source
+        fields = ["id", "label", "kind", "url", "accessed_at", "notes"]
 
 
 class EntityReferenceSerializer(serializers.ModelSerializer[Entity]):
@@ -179,6 +191,7 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
         read_only=True,
         source="relations_from",
     )
+    sources = SourceSerializer(many=True, read_only=True)
 
     class Meta:
         model = Entity
@@ -207,6 +220,7 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
             "domains",
             "variant_of",
             "relations",
+            "sources",
             "created_at",
             "updated_at",
             "divinity_profile",

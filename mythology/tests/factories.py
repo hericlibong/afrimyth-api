@@ -20,6 +20,8 @@ from mythology.models import (
     Gender,
     HeroProfile,
     RelationKind,
+    Source,
+    SourceKind,
 )
 
 
@@ -101,6 +103,21 @@ def create_domain(
 ) -> Domain:
     """Crée un domaine."""
     return Domain.objects.create(name=name, slug=slug, **extra)
+
+
+def create_source(
+    entity: Entity,
+    label: str = "Fictional Handbook of Test Myths",
+    kind: str = SourceKind.BOOK,
+    **extra: Any,
+) -> Source:
+    """Crée une source documentaire **fictive** rattachée à `entity`.
+
+    Les références employées par les tests sont inventées pour la
+    démonstration : aucune publication réelle n'est citée, et aucune n'est
+    attribuée au corpus.
+    """
+    return Source.objects.create(entity=entity, label=label, kind=kind, **extra)
 
 
 def create_relation(

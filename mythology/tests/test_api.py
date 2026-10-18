@@ -1,3 +1,4 @@
+import datetime
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 
@@ -10,6 +11,7 @@ from mythology.models import (
     Entity,
     EntityType,
     RelationKind,
+    SourceKind,
     ThreatLevel,
 )
 from mythology.serializers import EntityDetailSerializer
@@ -25,6 +27,7 @@ from mythology.tests.factories import (
     create_hero,
     create_hero_profile,
     create_relation,
+    create_source,
 )
 from mythology.views import EntityViewSet
 
@@ -318,6 +321,105 @@ def test_detail_n_expose_pas_les_relations_entrantes(client: Client) -> None:
     assert "relations_to" not in payload
 
 
+def test_liste_n_expose_pas_les_sources(client: Client) -> None:
+    """Le contrat de la collection reste strictement inchangé.
+
+    Les références employées ici sont fictives.
+    """
+    entity = create_entity()
+    create_source(entity)
+
+    response = client.get(reverse("entity-list"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
+    assert "sources" not in payload[0]
+
+
+def test_detail_expose_les_sources(client: Client) -> None:
+    """Chaque source porte `id`, `label`, `kind`, `url`, `accessed_at`, `notes`.
+
+    Les références employées ici sont fictives.
+    """
+    entity = create_entity()
+    create_source(
+        entity,
+        label="Fictional Encyclopedia of Imaginary Myths",
+        kind=SourceKind.ENCYCLOPEDIA,
+        url="https://example.invalid/fictional-entry",
+        accessed_at=datetime.date(2026, 5, 20),
+        notes="Volume 2, page 118 — fictional reference.",
+    )
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert response.status_code == 200
+    sources = response.json()["sources"]
+    assert len(sources) == 1
+    source = sources[0]
+    assert set(source) == {"id", "label", "kind", "url", "accessed_at", "notes"}
+    assert source["label"] == "Fictional Encyclopedia of Imaginary Myths"
+    assert source["kind"] == SourceKind.ENCYCLOPEDIA
+    assert source["url"] == "https://example.invalid/fictional-entry"
+    # Une date renseignée est exposée au format ISO `YYYY-MM-DD`.
+    assert source["accessed_at"] == "2026-05-20"
+    assert source["notes"] == "Volume 2, page 118 — fictional reference."
+    # L'entité n'est pas réimbriquée dans sa propre source.
+    assert "entity" not in source
+
+
+def test_detail_sans_source(client: Client) -> None:
+    """Sans source, la clé est présente et vaut une liste vide."""
+    entity = create_entity()
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert response.status_code == 200
+    assert response.json()["sources"] == []
+
+
+def test_detail_source_sans_url_ni_date(client: Client) -> None:
+    """Sans URL : `url=""`. Sans date : `accessed_at=null`.
+
+    Les références employées ici sont fictives.
+    """
+    entity = create_entity()
+    create_source(
+        entity,
+        label="Fictional oral testimony, village of Testville",
+        kind=SourceKind.ORAL,
+    )
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    source = response.json()["sources"][0]
+    assert source["url"] == ""
+    assert source["accessed_at"] is None
+    assert source["notes"] == ""
+
+
+def test_detail_ordonne_les_sources(client: Client) -> None:
+    """L'ordre est déterministe : `label`, puis `id`.
+
+    Les références employées ici sont fictives.
+    """
+    entity = create_entity()
+    create_source(entity, label="Zeta Fictional Review", kind=SourceKind.ARTICLE)
+    create_source(entity, label="Alpha Fictional Encyclopedia")
+    create_source(entity, label="Mu Fictional Museum Catalogue")
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    labels = [source["label"] for source in response.json()["sources"]]
+    assert labels == [
+        "Alpha Fictional Encyclopedia",
+        "Mu Fictional Museum Catalogue",
+        "Zeta Fictional Review",
+    ]
+
+
 def test_detail_imbrique_le_profil_de_divinite(client: Client) -> None:
     """Le détail expose les champs communs et le profil quand il existe."""
     entity = create_entity(
@@ -413,13 +515,13 @@ def test_detail_a_un_cout_constant_quel_que_soit_le_type(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail coûte 6 requêtes pour chacun des trois types.
+    """Le détail coûte 7 requêtes pour chacun des trois types.
 
     Les trois profils, les trois ancrages principaux et la figure de
     référence sont joints à la requête de l'entité par `select_related` ; les
-    cinq requêtes restantes sont celles des préchargements — quatre
-    collections de référentiels et les relations sortantes — que Django
-    exécute même lorsque les collections sont vides.
+    six requêtes restantes sont celles des préchargements — quatre
+    collections de référentiels, les relations sortantes et les sources — que
+    Django exécute même lorsque les collections sont vides.
 
     Ce que le test protège : qu'aucun profil ne déclenche de requête
     supplémentaire, et que le coût ne dépende pas du type de l'entité.
@@ -432,7 +534,7 @@ def test_detail_a_un_cout_constant_quel_que_soit_le_type(
     create_creature_profile(creature)
 
     for entity in (divinity, hero, creature):
-        with django_assert_num_queries(6):
+        with django_assert_num_queries(7):
             client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
 
 
@@ -440,19 +542,22 @@ def test_detail_entierement_relie_ne_provoque_pas_de_n_plus_un(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail d'une entité entièrement rattachée coûte 6 requêtes.
+    """Le détail d'une entité entièrement rattachée coûte 7 requêtes.
 
     Décompte : 1 requête pour l'entité, qui ramène par `select_related` les
     trois profils, les trois ancrages principaux et la figure de référence,
     puis 1 requête par collection préchargée — pays, ethnies et aires
-    secondaires, domaines, et relations sortantes. Les trois relations
-    coûtent une seule requête, leur cible étant jointe dans le `Prefetch`.
+    secondaires, domaines, relations sortantes et sources. Les trois
+    relations coûtent une seule requête, leur cible étant jointe dans le
+    `Prefetch` ; les deux sources en coûtent une également.
 
     Ce test fixe le budget global de requêtes du détail. À lui seul, il ne
     prouve pas le préchargement : une collection non préchargée demande aussi
     une seule requête pour cette unique entité, quel que soit son contenu.
     C'est `test_detail_precharge_se_serialise_sans_requete` qui apporte cette
     preuve.
+
+    Les références documentaires employées ici sont fictives.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
@@ -462,12 +567,16 @@ def test_detail_entierement_relie_ne_provoque_pas_de_n_plus_un(
     create_relation(entity, RelationKind.PARENT, to_entity=cible)
     create_relation(entity, RelationKind.CONSORT, to_entity=create_hero())
     create_relation(entity, RelationKind.ENEMY, to_name="Figure sans fiche")
+    create_source(entity, label="Alpha Fictional Encyclopedia")
+    create_source(entity, label="Zeta Fictional Review", kind=SourceKind.ARTICLE)
 
-    with django_assert_num_queries(6):
+    with django_assert_num_queries(7):
         response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
 
     assert response.status_code == 200
-    assert len(response.json()["relations"]) == 3
+    payload = response.json()
+    assert len(payload["relations"]) == 3
+    assert len(payload["sources"]) == 2
 
 
 def test_detail_precharge_se_serialise_sans_requete(
@@ -480,7 +589,8 @@ def test_detail_precharge_se_serialise_sans_requete(
     test, et non le budget, qui prouve la présence de chaque préchargement.
 
     Le jeu couvre une figure de référence, deux relations résolues — dont les
-    cibles doivent elles aussi être jointes — et une cible absente.
+    cibles doivent elles aussi être jointes —, une cible absente et plusieurs
+    sources documentaires fictives.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
@@ -493,6 +603,9 @@ def test_detail_precharge_se_serialise_sans_requete(
     )
     create_relation(entity, RelationKind.CONSORT, to_entity=create_hero())
     create_relation(entity, RelationKind.ENEMY, to_name="Figure sans fiche")
+    create_source(entity, label="Alpha Fictional Encyclopedia")
+    create_source(entity, label="Mu Fictional Museum Catalogue")
+    create_source(entity, label="Zeta Fictional Review", kind=SourceKind.ARTICLE)
 
     view = EntityViewSet()
     view.action = "retrieve"
@@ -512,6 +625,11 @@ def test_detail_precharge_se_serialise_sans_requete(
         for relation in payload["relations"]
         if relation["to_entity"] is not None
     ] == ["Soundiata", "Oranyan"]
+    assert [source["label"] for source in payload["sources"]] == [
+        "Alpha Fictional Encyclopedia",
+        "Mu Fictional Museum Catalogue",
+        "Zeta Fictional Review",
+    ]
 
 
 def test_slug_inconnu_renvoie_404(client: Client) -> None:

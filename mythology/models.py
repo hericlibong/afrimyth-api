@@ -6,9 +6,11 @@ Contenu actuel : le tronc commun `Entity` — avec sa variante éventuelle
 `Country`, `Ethnicity`, `Domain`) et les liens entre figures
 (`EntityRelation`).
 
-Restent à venir : `Source`, le workflow éditorial et les champs de suppression
-logique. Les données de rendu visuel sont hors V1, conformément à la section 8
-de l'ADR 0002.
+S'y ajoutent les références documentaires (`Source`).
+
+Restent à venir : le workflow éditorial et les champs de suppression logique.
+Les données de rendu visuel sont hors V1, conformément à la section 8 de
+l'ADR 0002.
 """
 
 from __future__ import annotations
@@ -78,6 +80,17 @@ class RelationKind(models.TextChoices):
     CONSORT = "consort", "Consort"
     ALLY = "ally", "Ally"
     ENEMY = "enemy", "Enemy"
+
+
+class SourceKind(models.TextChoices):
+    """Nature d'une référence documentaire."""
+
+    BOOK = "book", "Book"
+    ARTICLE = "article", "Article"
+    ENCYCLOPEDIA = "encyclopedia", "Encyclopedia"
+    MUSEUM = "museum", "Museum"
+    ORAL = "oral", "Oral tradition or testimony"
+    OTHER = "other", "Other"
 
 
 def string_array() -> ArrayField[list[str], list[str]]:
@@ -659,3 +672,69 @@ class EntityRelation(models.Model):
             raise ValidationError(
                 {"to_entity": "An entity cannot be related to itself."}
             )
+
+
+class Source(models.Model):
+    """Référence documentaire rattachée à une fiche.
+
+    Une source appartient à **une seule** entité ; une entité en possède zéro
+    ou plusieurs. La même référence bibliographique peut donc être saisie pour
+    plusieurs entités : il n'y a volontairement ni catalogue partagé ni
+    relation plusieurs-à-plusieurs à ce stade. Mutualiser les références
+    supposerait une identité bibliographique stable — édition, pagination,
+    tirage — que le corpus ne fournit pas.
+
+    `label` reste libre : titre d'ouvrage, nom de site, cote de musée ou
+    description d'un témoignage. Les précisions qui ne tiennent pas dans ce
+    libellé — auteur, pages, édition, contexte d'un entretien — vont dans
+    `notes`. Aucun champ bibliographique supplémentaire n'est créé : le corpus
+    V2 ne contient aujourd'hui **aucune** source, et inventer un modèle
+    bibliographique complet avant d'avoir une seule donnée réelle serait
+    prématuré.
+
+    Une source sans URL reste valide : un livre ou une tradition orale n'en a
+    pas. `accessed_at` est une date de **consultation**, non de publication ;
+    elle peut être renseignée sans URL, par exemple la date d'un entretien ou
+    d'une visite. Aucune valeur n'est remplie automatiquement.
+
+    Aucune vérification réseau n'est effectuée : ni disponibilité de l'URL, ni
+    liste de domaines autorisés. Le format seul est validé.
+    """
+
+    entity = models.ForeignKey(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name="sources",
+    )
+    label = models.CharField(max_length=255)
+    kind = models.CharField(max_length=20, choices=SourceKind.choices)
+    url = models.URLField(max_length=2048, blank=True)
+    accessed_at = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        # Aucune unicité sur `label`, `url` ou leur combinaison : deux
+        # éditions, deux pages ou deux usages d'une même référence sont
+        # légitimes. Écarter les doublons relève du contrôle éditorial, pas de
+        # la structure de la base.
+        ordering = ["label", "id"]
+        verbose_name = "source documentaire"
+        verbose_name_plural = "sources documentaires"
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.kind}) — {self.entity.name}"
+
+    def clean(self) -> None:
+        """Refuse une référence composée uniquement d'espaces.
+
+        Portée exacte : cette règle n'existe qu'ici, donc elle ne s'applique
+        qu'à `full_clean()`, aux formulaires et à l'administration. `"   "`
+        n'est pas la chaîne vide, et aucune contrainte PostgreSQL ne
+        l'intercepte — `objects.create(label="   ")` serait accepté. De même,
+        le caractère obligatoire de `label` et de `kind` ainsi que le format
+        de l'URL sont vérifiés par la validation Django, et non par la base.
+        """
+        super().clean()
+        self.label = self.label.strip()
+        if not self.label:
+            raise ValidationError({"label": "Provide a non-empty source label."})

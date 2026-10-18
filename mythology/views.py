@@ -32,11 +32,12 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
         trois ancrages principaux et la figure de référence, puis une requête
         par collection préchargée. Les relations sortantes sont préchargées
         avec leur cible jointe : une seule requête supplémentaire, quel que
-        soit le nombre de liens.
+        soit le nombre de liens. Les sources suivent le même principe — une
+        requête pour toutes celles de la fiche.
 
-        La liste n'expose ni profils, ni référentiels, ni relations : son
-        queryset reste nu, ce qui évite de payer ces jointures pour une
-        réponse compacte.
+        La liste n'expose ni profils, ni référentiels, ni relations, ni
+        sources : son queryset reste nu, ce qui évite de payer ces jointures
+        pour une réponse compacte.
         """
         queryset = Entity.objects.all()
         if self.action == "retrieve":
@@ -57,6 +58,7 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
                     "relations_from",
                     queryset=EntityRelation.objects.select_related("to_entity"),
                 ),
+                "sources",
             )
         return queryset
 
