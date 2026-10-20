@@ -38,8 +38,15 @@ class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
         La liste n'expose ni profils, ni référentiels, ni relations, ni
         sources : son queryset reste nu, ce qui évite de payer ces jointures
         pour une réponse compacte.
+
+        **Portée du manager `active`.** Il écarte les fiches supprimées
+        logiquement — `deleted_at` renseigné — de la **racine** de la vue :
+        elles disparaissent de la liste et leur URL renvoie 404. Il ne filtre
+        pas les cibles imbriquées : une fiche supprimée reste visible comme
+        `variant_of` ou comme cible d'une relation. La visibilité cohérente de
+        tout le graphe, et le filtrage sur `status`, relèvent de la phase 3.
         """
-        queryset = Entity.objects.all()
+        queryset = Entity.active.all()
         if self.action == "retrieve":
             return queryset.select_related(
                 "divinity_profile",

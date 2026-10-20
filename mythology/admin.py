@@ -51,16 +51,35 @@ class EntityAdmin(admin.ModelAdmin[Entity]):
     list_display = [
         "name",
         "entity_type",
+        "status",
+        "created_by",
         "category",
-        "gender",
         "primary_country",
-        "primary_ethnicity",
         "updated_at",
     ]
-    list_filter = ["entity_type", "gender", "primary_cultural_area__kind"]
+    list_filter = [
+        "status",
+        "entity_type",
+        "gender",
+        "primary_cultural_area__kind",
+    ]
     search_fields = ["name"]
     prepopulated_fields = {"slug": ["name"]}
-    readonly_fields = ["id", "created_at", "updated_at"]
+    # Les horodatages de soumission, de revue et de suppression ainsi que
+    # `deleted_by` sont en lecture seule : ils seront posés par les services
+    # de transition de la phase 4, pas saisis à la main. `status`,
+    # `created_by`, `reviewed_by` et `review_notes` restent modifiables, ce
+    # qui permet de préparer des jeux de test — sans constituer pour autant
+    # une implémentation du workflow ni de la matrice de permissions.
+    readonly_fields = [
+        "id",
+        "created_at",
+        "updated_at",
+        "submitted_at",
+        "reviewed_at",
+        "deleted_at",
+        "deleted_by",
+    ]
     # Les rattachements principaux passent par une recherche plutôt qu'une
     # liste déroulante, et les rattachements multiples par le widget
     # horizontal : le formulaire reste celui de Django, sans personnalisation.

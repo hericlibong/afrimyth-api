@@ -6,11 +6,14 @@ Contenu actuel : le tronc commun `Entity` — avec sa variante éventuelle
 `Country`, `Ethnicity`, `Domain`) et les liens entre figures
 (`EntityRelation`).
 
-S'y ajoutent les références documentaires (`Source`).
+S'y ajoutent les références documentaires (`Source`) et les champs de
+plateforme de `Entity` : propriété, état éditorial, revue et suppression
+logique.
 
-Restent à venir : le workflow éditorial et les champs de suppression logique.
-Les données de rendu visuel sont hors V1, conformément à la section 8 de
-l'ADR 0002.
+Ces champs de plateforme sont **posés, non pilotés** : les transitions de
+statut, l'attribution automatique du propriétaire, les rôles, les permissions
+et la restauration appartiennent à la phase 4. Les données de rendu visuel
+sont hors V1, conformément à la section 8 de l'ADR 0002.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Collection
 
+from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -80,6 +84,32 @@ class RelationKind(models.TextChoices):
     CONSORT = "consort", "Consort"
     ALLY = "ally", "Ally"
     ENEMY = "enemy", "Enemy"
+
+
+class EntityStatus(models.TextChoices):
+    """État éditorial d'une fiche, au sens de la décision 7 de l'ADR 0002.
+
+    Aucun statut `deleted` : la suppression logique est portée séparément par
+    `Entity.deleted_at`, de sorte qu'une fiche supprimée conserve l'état
+    éditorial qu'elle avait. Un champ unique mêlant les deux notions
+    obligerait à choisir entre « était publiée » et « est supprimée ».
+    """
+
+    DRAFT = "draft", "Draft"
+    SUBMITTED = "submitted", "Submitted"
+    PUBLISHED = "published", "Published"
+    REJECTED = "rejected", "Rejected"
+
+
+class ActiveEntityManager(models.Manager["Entity"]):
+    """Manager restreint aux fiches non supprimées logiquement.
+
+    Ne filtre **que** `deleted_at` : le statut éditorial n'entre pas en jeu,
+    le filtrage sur `published` relevant de la phase 3.
+    """
+
+    def get_queryset(self) -> models.QuerySet[Entity]:
+        return super().get_queryset().filter(deleted_at__isnull=True)
 
 
 class SourceKind(models.TextChoices):
@@ -390,8 +420,59 @@ class Entity(models.Model):
         blank=True,
     )
 
+    # --- Champs de plateforme -------------------------------------------
+    #
+    # Propriété, état éditorial, revue et suppression logique, au sens de la
+    # décision 7 de l'ADR 0002. Ces champs sont **posés**, non pilotés :
+    # aucun `save()` surchargé, aucun signal, aucune machine à états. Les
+    # transitions, l'attribution automatique du propriétaire et la matrice de
+    # permissions appartiennent à la phase 4.
+    #
+    # `SET_NULL` sur les trois acteurs : supprimer un compte ne doit jamais
+    # supprimer une fiche, et une date historique peut légitimement subsister
+    # avec un acteur devenu nul. Aucune contrainte ne lie donc acteur, date et
+    # statut.
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="created_entities",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=EntityStatus.choices,
+        default=EntityStatus.DRAFT,
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_entities",
+        null=True,
+        blank=True,
+    )
+    review_notes = models.TextField(blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="deleted_entities",
+        null=True,
+        blank=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # `objects` est déclaré en premier, donc manager par défaut : il voit
+    # **toutes** les lignes, y compris celles supprimées logiquement. C'est ce
+    # que veut la décision 7 de l'ADR 0002 — l'administration et une future
+    # restauration doivent pouvoir les atteindre, et le parcours des relations
+    # ne doit jamais masquer de lignes silencieusement.
+    objects = models.Manager()
+    active = ActiveEntityManager()
 
     class Meta:
         ordering = ["name"]

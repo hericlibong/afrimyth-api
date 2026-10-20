@@ -5,10 +5,12 @@ from contextlib import AbstractContextManager
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from mythology.models import (
     CulturalAreaKind,
     Entity,
+    EntityStatus,
     EntityType,
     RelationKind,
     SourceKind,
@@ -43,6 +45,20 @@ REFERENCE_KEYS = {
     "primary_cultural_area",
     "secondary_cultural_areas",
     "domains",
+}
+
+# Champs de plateforme : internes à cet incrément, aucun ne doit apparaître
+# dans l'API publique. Le contrat destiné aux contributeurs sera préparé avec
+# les permissions, en phase 4.
+INTERNAL_KEYS = {
+    "created_by",
+    "status",
+    "submitted_at",
+    "reviewed_at",
+    "reviewed_by",
+    "review_notes",
+    "deleted_at",
+    "deleted_by",
 }
 
 
@@ -418,6 +434,115 @@ def test_detail_ordonne_les_sources(client: Client) -> None:
         "Mu Fictional Museum Catalogue",
         "Zeta Fictional Review",
     ]
+
+
+def test_liste_ne_divulgue_aucun_champ_interne(client: Client) -> None:
+    """Aucun champ de plateforme ne fuit dans la collection."""
+    create_entity(
+        status=EntityStatus.PUBLISHED,
+        review_notes="Private reviewer note.",
+    )
+
+    response = client.get(reverse("entity-list"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
+    assert not INTERNAL_KEYS & set(payload[0])
+
+
+def test_detail_ne_divulgue_aucun_champ_interne(client: Client) -> None:
+    """Ni compte, ni note de relecture, ni champ de suppression dans le détail.
+
+    Les notes de relecture sont privées, et les comptes ne doivent pas
+    exposer d'identité. La vérification porte aussi sur la charge utile
+    brute, pour attraper une fuite même sous une autre clé.
+    """
+    entity = create_entity(
+        status=EntityStatus.PUBLISHED,
+        review_notes="Private reviewer note.",
+        submitted_at=timezone.now(),
+    )
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert not INTERNAL_KEYS & set(payload)
+    assert "Private reviewer note." not in response.content.decode()
+
+
+@pytest.mark.parametrize("status", EntityStatus.values)
+def test_fiche_active_reste_accessible_quel_que_soit_son_statut(
+    client: Client, status: str
+) -> None:
+    """À ce stade, le statut ne filtre rien.
+
+    Le filtrage sur `published` appartient à la phase 3 : une fiche en
+    `draft`, `submitted`, `published` ou `rejected` est encore lisible dès
+    lors qu'elle n'est pas supprimée logiquement.
+    """
+    entity = create_entity(status=status)
+
+    liste = client.get(reverse("entity-list"))
+    detail = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert len(liste.json()) == 1
+    assert detail.status_code == 200
+
+
+def test_fiche_supprimee_disparait_de_la_liste(client: Client) -> None:
+    """Une fiche marquée supprimée n'est plus listée.
+
+    Le marquage est posé ici par l'ORM : c'est une préparation de test, pas
+    l'appel d'un service de suppression, qui n'existe pas encore.
+    """
+    visible = create_entity(name="Visible", slug="visible")
+    supprimee = create_entity(name="Supprimée", slug="supprimee")
+    supprimee.deleted_at = timezone.now()
+    supprimee.save()
+
+    response = client.get(reverse("entity-list"))
+
+    slugs = [item["slug"] for item in response.json()]
+    assert slugs == [visible.slug]
+
+
+def test_detail_d_une_fiche_supprimee_renvoie_404(client: Client) -> None:
+    """L'URL d'une fiche supprimée logiquement renvoie 404."""
+    entity = create_entity()
+    entity.deleted_at = timezone.now()
+    entity.save()
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    assert response.status_code == 404
+    # La ligne existe toujours en base : seule la vue l'écarte.
+    assert Entity.objects.filter(pk=entity.pk).exists()
+
+
+def test_cible_imbriquee_supprimee_reste_visible(client: Client) -> None:
+    """Limite connue : `active` ne filtre que la racine de la vue.
+
+    Une fiche supprimée reste exposée comme `variant_of` ou comme cible de
+    relation. Ce test fixe le comportement réel afin que la limite soit
+    constatée maintenant ; la visibilité cohérente du graphe doit être
+    traitée avant la livraison publique de la phase 3.
+    """
+    reference = create_entity(name="Référence", slug="reference")
+    cible = create_entity(name="Cible", slug="cible")
+    entity = create_entity(name="Shango", slug="shango", variant_of=reference)
+    create_relation(entity, RelationKind.PARENT, to_entity=cible)
+
+    for supprimee in (reference, cible):
+        supprimee.deleted_at = timezone.now()
+        supprimee.save()
+
+    response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
+
+    payload = response.json()
+    assert payload["variant_of"]["slug"] == "reference"
+    assert payload["relations"][0]["to_entity"]["slug"] == "cible"
 
 
 def test_detail_imbrique_le_profil_de_divinite(client: Client) -> None:
