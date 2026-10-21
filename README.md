@@ -47,6 +47,43 @@ python manage.py runserver
 The health endpoint is then available at
 <http://127.0.0.1:8000/api/health/> and returns `{"status": "ok"}`.
 
+## API documentation
+
+Three routes serve the same generated OpenAPI schema. All are readable
+without logging in, like the API they describe.
+
+| Route | Purpose |
+|---|---|
+| `/api/schema/` | OpenAPI 3 schema, served as YAML |
+| `/api/docs/` | Swagger UI — browse the endpoints and run requests with **Try it out** |
+| `/api/redoc/` | ReDoc — a reading-oriented rendering of the same schema |
+
+No generated schema file is committed: the schema is produced from the code at request time.
+To generate and validate it locally:
+
+```bash
+python manage.py spectacular --file schema.yml --validate --fail-on-warn
+```
+
+The command fails on generator warnings and schema validation errors. It
+complements the contract tests; it does not detect every mismatch with runtime
+behaviour. CI integration is planned for the delivery phase.
+
+**Using Swagger UI.** The entity list, entity detail and health operations
+are `GET` and need no credentials.
+Expand an operation, press **Try it out**, optionally fill the collection's
+query parameters, then **Execute**. On a database holding only unpublished
+drafts, the collection answers `200` with zero results and any detail slug
+answers `404` — see the visibility rule below. Write methods are not offered,
+because none exists.
+
+**CDN dependency.** Swagger UI and ReDoc load their JavaScript and CSS from a
+public CDN. Without internet access the HTML page is still served but will
+not render. No offline bundle is shipped, as no such need has been
+established.
+ReDoc is pinned to version 2.5.3, compatible with the classic-script template
+provided by drf-spectacular; it does not follow the CDN's `latest` alias.
+
 ## Public read API
 
 Two read-only endpoints, open to anonymous clients:
@@ -173,9 +210,8 @@ behaviour, not a misconfiguration.
 
 ### Not available yet
 
-The OpenAPI schema with Swagger or ReDoc is not implemented, nor are
-authentication, JWT, write operations and the moderation workflow. Every HTTP
-write method is refused with `405`.
+Authentication, JWT, write operations and the moderation workflow are not
+implemented. Every HTTP write method is refused with `405`.
 
 ## Pilot corpus import
 
@@ -241,10 +277,11 @@ and geographic reference models, cultural variants, relations between figures,
 documentary sources, editorial state fields, the Django admin, a read-only
 list/detail API, and the pilot corpus import described above.
 
-Phase 3 in progress: the public read contract exposes only published,
-non-deleted entities and hides non-public nested references, and the
-collection is now paginated, searchable and filterable.
+Phase 3 completed after code review and manual Swagger/ReDoc checks: the public read contract exposes only
+published, non-deleted entities and hides non-public nested references, the
+collection is paginated, searchable and filterable, and the contract is
+published as an OpenAPI schema with Swagger UI and ReDoc.
 
 The API is **read-only** — every write method returns `405`. Authentication,
 object-level permissions, write operations and the moderation workflow are
-planned for a later phase, as is the OpenAPI schema.
+planned for a later phase.

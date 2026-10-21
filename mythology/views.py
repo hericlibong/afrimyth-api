@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from django.db.models import QuerySet
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
@@ -20,6 +21,16 @@ from rest_framework.serializers import BaseSerializer
 
 from mythology.models import Entity, EntityType
 from mythology.pagination import EntityPagination
+from mythology.schema import (
+    DETAIL_DESCRIPTION,
+    DETAIL_EXAMPLE,
+    ENTITY_NOT_FOUND_RESPONSE,
+    INVALID_PARAMETER_RESPONSE,
+    LIST_DESCRIPTION,
+    LIST_EXAMPLE,
+    LIST_PARAMETERS,
+    PAGE_NOT_FOUND_RESPONSE,
+)
 from mythology.selectors import (
     filter_public_entities,
     public_entities,
@@ -33,6 +44,36 @@ from mythology.serializers import EntityDetailSerializer, EntityListSerializer
 ISO_CODE_PATTERN = re.compile(r"^[A-Za-z]{2}$")
 
 
+@extend_schema_view(
+    # Les paramètres sont déclarés **ici** et non globalement : ils ne doivent
+    # apparaître que sur la liste. `parameters=[]` sur le détail empêche
+    # l'héritage éventuel et garde sa signature limitée au slug.
+    list=extend_schema(
+        operation_id="entities_list",
+        summary="List public entities",
+        description=LIST_DESCRIPTION,
+        parameters=LIST_PARAMETERS,
+        responses={
+            200: EntityListSerializer(many=True),
+            400: INVALID_PARAMETER_RESPONSE,
+            404: PAGE_NOT_FOUND_RESPONSE,
+        },
+        examples=[LIST_EXAMPLE],
+        auth=[],
+    ),
+    retrieve=extend_schema(
+        operation_id="entities_retrieve",
+        summary="Retrieve one public entity",
+        description=DETAIL_DESCRIPTION,
+        parameters=[],
+        responses={
+            200: EntityDetailSerializer,
+            404: ENTITY_NOT_FOUND_RESPONSE,
+        },
+        examples=[DETAIL_EXAMPLE],
+        auth=[],
+    ),
+)
 class EntityViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     """Collection et détail **publics** des entités, identifiées par leur slug.
 

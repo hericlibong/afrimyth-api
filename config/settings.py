@@ -10,15 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import django_stubs_ext
 from dotenv import load_dotenv
-from rest_framework.generics import GenericAPIView
-from rest_framework.serializers import BaseSerializer
-
-# Les classes génériques de Django et de DRF ne le sont que pour les stubs.
-# Ce correctif les rend indexables à l'exécution, afin que le code puisse être
-# annoté — `ModelAdmin[Entity]`, `ModelSerializer[Entity]` — sous mypy strict.
-django_stubs_ext.monkeypatch(extra_classes=[BaseSerializer, GenericAPIView])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -70,6 +62,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "accounts",
     "mythology",
 ]
@@ -147,6 +140,73 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # drf-spectacular remplace le générateur de schéma par défaut de DRF.
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+
+# --- Schéma OpenAPI -----------------------------------------------------------
+
+# Les textes de cette section sont publics : ils apparaissent dans le schéma,
+# dans Swagger UI et dans ReDoc. Ils sont donc en anglais, conformément à
+# l'ADR 0003.
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Afrimyth API",
+    "DESCRIPTION": (
+        "Public read-only API for African mythological figures: divinities, "
+        "heroes and creatures, with their cultural and geographic reference "
+        "data, their relations to one another and their documentary sources."
+        "\n\n"
+        "## Visibility\n\n"
+        "An entity is publicly visible **if and only if** its editorial "
+        "status is `published` and it has not been logically deleted. This "
+        "rule applies to both endpoints and to every caller — anonymous, "
+        "authenticated or superuser alike. A non-public entity and an unknown "
+        "slug return the same `404`, with the same body: the response never "
+        "reveals that a record exists, nor its editorial status.\n\n"
+        "Nested references follow the same rule. `variant_of` is `null` when "
+        "the referenced figure is not public, and a relation whose resolved "
+        "target is not public is omitted entirely — its name is never copied "
+        "into `to_name`.\n\n"
+        "## Read-only\n\n"
+        "Only `GET` is available. `POST`, `PUT`, `PATCH` and `DELETE` are "
+        "refused with `405 Method Not Allowed`. Authentication, write "
+        "operations and the moderation workflow are planned for a later "
+        "phase and are **not** part of this contract.\n\n"
+        "## Expect an empty collection\n\n"
+        "Entities are created as drafts. Until a record is explicitly "
+        "published, the collection legitimately returns zero results and "
+        "every detail URL returns `404`. On the current development database "
+        "the imported pilot figures are still drafts, so they are absent "
+        "from this API.\n\n"
+        "## Editorial caveat\n\n"
+        "Imported content reproduces a historical corpus. Its accuracy, "
+        "completeness and classification are under editorial review and are "
+        "not warranted by this API."
+    ),
+    "VERSION": "0.1.0",
+    # Le gabarit de drf-spectacular charge un script classique. ReDoc 3,
+    # désormais servi par @latest, exige un module et laisse une page blanche.
+    # Fixer une version 2 compatible évite les changements implicites du CDN.
+    "REDOC_DIST": "https://cdn.jsdelivr.net/npm/redoc@2.5.3",
+    # Le schéma décrit l'API sous `/api/`, mais les routes de documentation
+    # elles-mêmes n'ont pas à figurer dans le contrat.
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SCHEMA_PATH_PREFIX": "/api/",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SORT_OPERATIONS": False,
+    "ENUM_NAME_OVERRIDES": {
+        "EntityTypeEnum": "mythology.models.EntityType.choices",
+        "GenderEnum": "mythology.models.Gender.choices",
+        "ThreatLevelEnum": "mythology.models.ThreatLevel.choices",
+        "RelationKindEnum": "mythology.models.RelationKind.choices",
+        "SourceKindEnum": "mythology.models.SourceKind.choices",
+        "CulturalAreaKindEnum": "mythology.models.CulturalAreaKind.choices",
+    },
+    "TAGS": [
+        {"name": "entities", "description": "Public read access to figures."},
+        {"name": "service", "description": "Operational endpoints."},
+    ],
 }
 
 
@@ -166,5 +226,25 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+
+# --- Correctif de typage ------------------------------------------------------
+
+# Les classes génériques de Django et de DRF ne le sont que pour les stubs.
+# Ce correctif les rend indexables à l'exécution, afin que le code puisse être
+# annoté — `ModelAdmin[Entity]`, `ModelSerializer[Entity]` — sous mypy strict.
+#
+# **Il doit rester en fin de fichier.** Importer `rest_framework.generics`
+# évalue `api_settings.DEFAULT_FILTER_BACKENDS` dans le corps de
+# `GenericAPIView`, ce qui fait lire et mettre en cache `REST_FRAMEWORK`.
+# Placé en tête, cet import survenait avant la définition du réglage, et DRF
+# mémorisait un dictionnaire vide : tous nos réglages étaient alors ignorés,
+# dont `DEFAULT_PERMISSION_CLASSES`, qui retombait silencieusement sur le
+# défaut ouvert `AllowAny`. Un test garde ce comportement.
+import django_stubs_ext  # noqa: E402
+from rest_framework.generics import GenericAPIView  # noqa: E402
+from rest_framework.serializers import BaseSerializer  # noqa: E402
+
+django_stubs_ext.monkeypatch(extra_classes=[BaseSerializer, GenericAPIView])
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

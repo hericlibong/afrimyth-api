@@ -1,0 +1,352 @@
+"""OpenAPI annotations for the public entity endpoints.
+
+Kept in its own module so the long public descriptions and examples do not
+crowd out the view logic. It holds no behaviour: only the parameter
+declarations, response descriptions and examples that drf-spectacular cannot
+infer by introspection.
+
+Every string here is public — it is rendered in the schema, in Swagger UI and
+in ReDoc — and is therefore written in English, per ADR 0003.
+
+The example payloads are **synthetic**. They are written by hand to match the
+serializers, are never read from a database, and must not be taken for
+validated mythological facts.
+"""
+
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse
+from rest_framework import serializers
+
+from mythology.models import EntityType
+
+# --- Query parameters ---------------------------------------------------
+#
+# Ces cinq paramètres sont documentés explicitement :
+# `entity_type`, `country` et `cultural_area` sont appliqués à la main dans
+# `get_queryset()`, et `page` comme `search` méritent une description plus
+# précise que celle déduite automatiquement. Ils sont déclarés ici une seule
+# fois, et n'apparaissent que sur la liste.
+
+PAGE_PARAMETER = OpenApiParameter(
+    name="page",
+    type=int,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description=(
+        "Page number within the paginated collection. The page size is fixed "
+        "at 20 and cannot be changed by the client. A non-existent or "
+        "malformed page returns `404`."
+    ),
+    examples=[OpenApiExample("Second page", value=2)],
+)
+
+SEARCH_PARAMETER = OpenApiParameter(
+    name="search",
+    type=str,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description=(
+        "Case-insensitive search across `name`, `category`, `cultural_role` "
+        "and `story_description`. Internal review notes, documentary sources "
+        "and related entities are **not** searched: a search is never an "
+        "indirect path to data the API does not expose. An empty value does "
+        "not filter."
+    ),
+    examples=[OpenApiExample("By name", value="anansi")],
+)
+
+ENTITY_TYPE_PARAMETER = OpenApiParameter(
+    name="entity_type",
+    type=str,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    enum=list(EntityType.values),
+    description=(
+        "Exact entity type. An empty value does not filter; an unknown value "
+        "returns `400`."
+    ),
+    examples=[OpenApiExample("Divinities only", value="divinity")],
+)
+
+COUNTRY_PARAMETER = OpenApiParameter(
+    name="country",
+    type=str,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description=(
+        "Two-letter ISO 3166-1 alpha-2 country code, normalised to upper "
+        "case, so `ng` and `NG` are equivalent. Matches the **primary or a "
+        "secondary** country of the entity; an entity matching through both "
+        "appears only once and is counted once.\n\n"
+        "A malformed code returns `400`. A well-formed but unknown code "
+        "returns an empty collection rather than an error, so the response "
+        "does not reveal which countries are recorded."
+    ),
+    examples=[OpenApiExample("Nigeria", value="NG")],
+)
+
+CULTURAL_AREA_PARAMETER = OpenApiParameter(
+    name="cultural_area",
+    type=str,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description=(
+        "Cultural area slug. Matches a **primary or secondary** attachment to "
+        "that area **or to any of its descendants**, following the hierarchy "
+        "actually stored in the data: `central-africa` therefore also "
+        "returns entities attached to `congo-basin`, at any depth. An entity "
+        "matching through several attachments appears only once.\n\n"
+        "Filtering by area never infers a country. An unknown slug returns an "
+        "empty collection rather than an error."
+    ),
+    examples=[OpenApiExample("Central Africa and below", value="central-africa")],
+)
+
+LIST_PARAMETERS = [
+    PAGE_PARAMETER,
+    SEARCH_PARAMETER,
+    ENTITY_TYPE_PARAMETER,
+    COUNTRY_PARAMETER,
+    CULTURAL_AREA_PARAMETER,
+]
+
+
+# --- Error responses ----------------------------------------------------
+
+
+class ErrorDetailSerializer(serializers.Serializer[None]):
+    """Standard DRF error body carrying a single `detail` message."""
+
+    detail = serializers.CharField(help_text="Human-readable error message.")
+
+
+class ParameterErrorSerializer(serializers.Serializer[None]):
+    """Validation error body: one key per rejected query parameter."""
+
+    entity_type = serializers.ListField(child=serializers.CharField(), required=False)
+    country = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+# --- Examples -----------------------------------------------------------
+#
+# Chaque exemple est synthétique et étiqueté comme tel, afin qu'il ne soit
+# pas confondu avec une fiche réelle du corpus.
+
+# L'exemple de liste donne **un seul élément** de `results` : la pagination
+# fournit elle-même l'enveloppe `count` / `next` / `previous`, et y insère
+# l'exemple. Fournir une liste produirait `results: [[…]]`, imbriqué deux
+# fois.
+LIST_EXAMPLE = OpenApiExample(
+    "Collection item (synthetic)",
+    description=(
+        "One synthetic figure. Invented data, shown to illustrate the shape "
+        "of each item inside `results`. The surrounding `count`, `next` and "
+        "`previous` values are generic placeholders supplied by the "
+        "pagination schema, not part of this example."
+    ),
+    response_only=True,
+    value={
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "slug": "example-hero",
+        "name": "Example Hero",
+        "entity_type": "hero",
+        "category": "Synthetic subtitle",
+    },
+)
+
+DETAIL_EXAMPLE = OpenApiExample(
+    "Entity with a divinity profile (synthetic)",
+    description=(
+        "Invented figure, shown to illustrate the response shape. Note that "
+        "the two non-matching profile keys are present and `null`, that the "
+        "relation to a figure without a record keeps its `to_name`, and that "
+        "`variant_of` is `null` here."
+    ),
+    response_only=True,
+    value={
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "slug": "example-divinity",
+        "name": "Example Divinity",
+        "entity_type": "divinity",
+        "category": "Synthetic subtitle",
+        "gender": "female",
+        "cultural_role": "Synthetic role",
+        "alignment": "Lawful Neutral",
+        "story_description": "Synthetic narrative, written for documentation.",
+        "characteristics": ["Synthetic trait"],
+        "physical_signs": ["Synthetic sign"],
+        "symbols": ["Synthetic symbol"],
+        "power_objects": [],
+        "symbolic_animals": ["Synthetic animal"],
+        "manifestations": "Synthetic manifestation.",
+        "primary_country": {
+            "id": 1,
+            "slug": "example-country",
+            "name": "Example Country",
+            "iso_code": "XX",
+        },
+        "secondary_countries": [],
+        "primary_ethnicity": {
+            "id": 1,
+            "slug": "example-ethnicity",
+            "name": "Example Ethnicity",
+        },
+        "secondary_ethnicities": [],
+        "primary_cultural_area": {
+            "id": 1,
+            "slug": "example-area",
+            "name": "Example Area",
+            "kind": "african_region",
+        },
+        "secondary_cultural_areas": [],
+        "domains": [{"id": 1, "slug": "example-domain", "name": "Example Domain"}],
+        "variant_of": None,
+        "relations": [
+            {
+                "id": 1,
+                "kind": "consort",
+                "to_entity": {
+                    "id": "9c858901-8a57-4791-81fe-4c455b099bc9",
+                    "slug": "example-hero",
+                    "name": "Example Hero",
+                    "entity_type": "hero",
+                },
+                "to_name": "",
+                "notes": "",
+            },
+            {
+                "id": 2,
+                "kind": "parent",
+                "to_entity": None,
+                "to_name": "Figure Without A Record",
+                "notes": "",
+            },
+        ],
+        "sources": [
+            {
+                "id": 1,
+                "label": "Synthetic Reference Work",
+                "kind": "book",
+                "url": "",
+                "accessed_at": None,
+                "notes": "Invented reference, for documentation only.",
+            }
+        ],
+        "created_at": "2026-10-21T09:00:00Z",
+        "updated_at": "2026-10-21T09:00:00Z",
+        "divinity_profile": {
+            "cult_offerings": ["Synthetic offering"],
+            "cult_taboos": [],
+            "cult_rituals": [],
+            "cult_places": [],
+            "cult_festivals": [],
+        },
+        "hero_profile": None,
+        "creature_profile": None,
+    },
+)
+
+
+# --- Response declarations ----------------------------------------------
+
+INVALID_PARAMETER_RESPONSE = OpenApiResponse(
+    response=ParameterErrorSerializer,
+    description="A query parameter was malformed.",
+    examples=[
+        OpenApiExample(
+            "Unknown entity type",
+            response_only=True,
+            value={
+                "entity_type": [
+                    "Unknown entity type 'titan'. Expected one of: divinity, "
+                    "hero, creature."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "Malformed country code",
+            response_only=True,
+            value={
+                "country": [
+                    "Invalid country code 'NGA'. Expected a two-letter ISO "
+                    "3166-1 alpha-2 code, for example 'NG'."
+                ]
+            },
+        ),
+    ],
+)
+
+PAGE_NOT_FOUND_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description="The requested page does not exist.",
+    examples=[
+        OpenApiExample(
+            "Invalid page",
+            response_only=True,
+            value={"detail": "Invalid page."},
+        )
+    ],
+)
+
+ENTITY_NOT_FOUND_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "No publicly visible entity matches this slug. The same response is "
+        "returned whether the slug does not exist at all or refers to an "
+        "entity that is not published or has been deleted: the body never "
+        "reveals which."
+    ),
+    examples=[
+        OpenApiExample(
+            "Unknown or non-public slug",
+            response_only=True,
+            value={"detail": "No Entity matches the given query."},
+        )
+    ],
+)
+
+LIST_DESCRIPTION = (
+    "Returns the paginated collection of publicly visible entities.\n\n"
+    "Only entities whose editorial status is `published` and that have not "
+    "been logically deleted are listed, for every caller. `count` reflects "
+    "that same restriction combined with the active search and filters, so "
+    "it never discloses hidden records.\n\n"
+    "**Pagination.** Fixed size of 20 items. `next` and `previous` preserve "
+    "every search and filter parameter. Results are ordered by `name`, then "
+    "by `id` to break ties between identically named figures — without that "
+    "tiebreaker a record could move between pages from one request to the "
+    "next.\n\n"
+    "**Combining parameters.** The filters combine with AND; within a single "
+    "filter, the primary and secondary attachments combine with OR. An entity "
+    "matching through several attachments is returned, and counted, only "
+    "once.\n\n"
+    "Each item carries the five compact fields below. Profiles, reference "
+    "data, relations and sources are only available on the detail endpoint.\n\n"
+    "**Empty collection.** A database holding only unpublished drafts, an "
+    "unknown country code and an unknown area slug all return the same "
+    "well-formed empty envelope. This is the expected behaviour, not an "
+    "error:\n\n"
+    "```json\n"
+    '{"count": 0, "next": null, "previous": null, "results": []}\n'
+    "```\n\n"
+    "Write methods are refused with `405 Method Not Allowed`."
+)
+
+DETAIL_DESCRIPTION = (
+    "Returns one publicly visible entity, addressed by its `slug`.\n\n"
+    "The three profile keys are **always present**: the one matching "
+    "`entity_type` carries the object, the other two are `null`. A stable set "
+    "of keys spares the client from testing for a key's presence in addition "
+    "to its value.\n\n"
+    "**Nested visibility.** `variant_of` is `null` when the reference figure "
+    "is not publicly visible, revealing neither its id, slug, name nor type. "
+    "A relation whose resolved target is not publicly visible is omitted "
+    "entirely, and the hidden target's name is never copied into `to_name`. "
+    "Targets are rendered as a four-field reference only — the detail is "
+    "never nested recursively.\n\n"
+    "These rules cover structured references. They do not censor names "
+    "appearing in the narrative text, nor in a genuinely unresolved relation: "
+    "reviewing the text itself is editorial work.\n\n"
+    "The collection's query parameters do not apply here: availability "
+    "depends solely on the public visibility of the requested slug.\n\n"
+    "Write methods are refused with `405 Method Not Allowed`."
+)
