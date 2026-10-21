@@ -44,7 +44,7 @@ from mythology.models import (
     RelationKind,
 )
 from mythology.serializers import EntityDetailSerializer
-from mythology.tests.factories import create_entity
+from mythology.tests.factories import create_entity, publish
 from mythology.views import EntityViewSet
 
 pytestmark = pytest.mark.django_db
@@ -990,6 +990,10 @@ def test_fiche_preexistante_sans_profil_est_preservee(tmp_path: Path) -> None:
 
 
 # --- API de lecture des fiches importées -------------------------------
+#
+# L'import crée volontairement en `draft`, donc invisible de l'API publique.
+# Ces tests publient explicitement les fiches **dans la base de test**, ce qui
+# ne change ni le comportement de la commande ni les statuts en développement.
 
 
 def test_api_de_detail_d_une_fiche_importee(client: Client, tmp_path: Path) -> None:
@@ -1005,6 +1009,7 @@ def test_api_de_detail_d_une_fiche_importee(client: Client, tmp_path: Path) -> N
         ],
     )
     call_command("import_mythology_pilot", input=corpus)
+    publish(Entity.objects.get(slug="oya"))
 
     response = client.get(reverse("entity-detail", kwargs={"slug": "oya"}))
 
@@ -1026,6 +1031,7 @@ def test_api_de_detail_d_une_fiche_importee(client: Client, tmp_path: Path) -> N
 def test_api_de_detail_de_la_creature_importee(client: Client, tmp_path: Path) -> None:
     """La créature importée expose son aire précise et aucun pays."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
+    publish(Entity.objects.get(slug="mokele-mbembe"))
 
     response = client.get(reverse("entity-detail", kwargs={"slug": "mokele-mbembe"}))
 
@@ -1044,6 +1050,7 @@ def test_detail_d_une_fiche_importee_coute_sept_requetes(
 ) -> None:
     """Le budget du détail reste de sept requêtes sur une fiche réelle importée."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
+    publish(Entity.objects.get(slug="oya"))
 
     with django_assert_num_queries(7):
         response = client.get(reverse("entity-detail", kwargs={"slug": "oya"}))
@@ -1070,6 +1077,9 @@ def test_fiche_importee_se_serialise_sans_requete(
         ],
     )
     call_command("import_mythology_pilot", input=corpus)
+    # La cible résolue doit elle aussi être publique pour rester exposée.
+    publish(Entity.objects.get(slug="oya"))
+    publish(Entity.objects.get(slug="anansi"))
 
     view = EntityViewSet()
     view.action = "retrieve"

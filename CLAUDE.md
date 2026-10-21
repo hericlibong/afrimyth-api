@@ -31,10 +31,12 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 - **Pas d'abstraction anticipée.** Pas de couche service/repository générique,
   pas de `BaseModel`, pas de mixins spéculatifs. Du Django idiomatique.
   En revanche, une **fonction métier concrètement demandée** est légitime
-  lorsqu'une règle ne peut pas être portée par un modèle seul — ainsi
+  lorsqu'une règle ne peut pas être portée par un modèle seul : ainsi
   `mythology/services.py`, prévu par la décision 6 de l'ADR 0002 pour
-  garantir le couple entité/profil. La règle exclut les abstractions
-  spéculatives, pas les fonctions explicitement commandées par la roadmap.
+  garantir le couple entité/profil, et `mythology/selectors.py`, demandé par
+  la phase 3 pour définir la visibilité publique en un seul endroit. La règle
+  exclut les abstractions spéculatives, pas les fonctions explicitement
+  commandées par la roadmap.
 - **Configuration.** Toute valeur dépendante de l'environnement passe par une
   variable d'environnement déclarée dans `.env.example`. Jamais de secret en
   dur ni dans le dépôt.

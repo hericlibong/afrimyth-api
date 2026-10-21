@@ -6,6 +6,8 @@ séparation est celle attendue en phase 3 ; les serializers d'écriture
 arriveront avec le CRUD de la phase 4.
 """
 
+from typing import Any
+
 from rest_framework import serializers
 
 from mythology.models import (
@@ -20,6 +22,7 @@ from mythology.models import (
     HeroProfile,
     Source,
 )
+from mythology.selectors import is_publicly_visible
 
 
 class SourceSerializer(serializers.ModelSerializer[Source]):
@@ -167,6 +170,17 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
     correspond au type porte l'objet, les deux autres valent `null`. Un
     contrat de clés stable évite au client de tester l'existence d'une clé en
     plus de sa valeur, et rend la réponse lisible quel que soit le type.
+
+    **Contrat d'utilisation.** Ce serializer masque de lui-même les
+    références non publiques : `variant_of` et les cibles de relations sont
+    filtrés par `is_publicly_visible()`, et non par le seul queryset. Il est
+    donc sûr quel que soit le queryset reçu — aucun chemin de repli ne
+    réexpose une référence masquée.
+
+    En revanche, il n'est **gratuit** que sur le queryset de
+    `selectors.public_entity_detail()`, qui joint `variant_of` et précharge
+    les relations déjà filtrées. Appliqué à un queryset nu, le filtrage reste
+    correct mais coûte une requête par référence consultée.
     """
 
     divinity_profile = DivinityProfileSerializer(read_only=True)
@@ -181,17 +195,42 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
     secondary_cultural_areas = CulturalAreaSerializer(many=True, read_only=True)
     domains = DomainSerializer(many=True, read_only=True)
 
-    variant_of = EntityReferenceSerializer(read_only=True)
+    variant_of = serializers.SerializerMethodField()
     # Seules les relations sortantes sont exposées. Les relations entrantes
     # — `relations_to` — et les variantes inverses viendront si un besoin
     # client le justifie ; les ajouter maintenant doublerait la charge utile
     # sans usage établi.
-    relations = EntityRelationSerializer(
-        many=True,
-        read_only=True,
-        source="relations_from",
-    )
+    relations = serializers.SerializerMethodField()
     sources = SourceSerializer(many=True, read_only=True)
+
+    def get_variant_of(self, entity: Entity) -> dict[str, Any] | None:
+        """Expose la figure de référence seulement si elle est publique.
+
+        Une référence non publique est rendue indistinguable d'une absence de
+        référence : ni identifiant, ni slug, ni nom, ni type ne filtrent.
+        """
+        if not is_publicly_visible(entity.variant_of):
+            return None
+        return EntityReferenceSerializer(entity.variant_of).data
+
+    def get_relations(self, entity: Entity) -> list[dict[str, Any]]:
+        """Expose les relations sortantes exposables publiquement.
+
+        Le filtrage est **répété ici**, alors que le queryset de la vue
+        précharge déjà des relations filtrées. Cette redondance est
+        volontaire : elle garantit qu'aucune utilisation du serializer — test,
+        futur appel interne, queryset oublié — ne puisse publier un lien vers
+        une cible masquée.
+
+        Un lien écarté disparaît entièrement ; son `to_name` n'est pas
+        renseigné avec le nom de la cible cachée.
+        """
+        visible = [
+            relation
+            for relation in entity.relations_from.all()
+            if relation.to_entity_id is None or is_publicly_visible(relation.to_entity)
+        ]
+        return list(EntityRelationSerializer(visible, many=True).data)
 
     class Meta:
         model = Entity

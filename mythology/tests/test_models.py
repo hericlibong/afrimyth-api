@@ -30,7 +30,7 @@ def test_creation_d_une_divinite_et_de_son_profil() -> None:
     assert profile.entity == entity
     assert profile.cult_offerings == ["Igname", "Rhum"]
     assert profile.cult_rituals == []
-    assert str(profile) == "Profil de divinité — Shango"
+    assert str(profile) == "Divinity profile — Shango"
 
 
 def test_uuid_est_la_cle_primaire() -> None:

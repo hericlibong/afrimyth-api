@@ -47,6 +47,56 @@ python manage.py runserver
 The health endpoint is then available at
 <http://127.0.0.1:8000/api/health/> and returns `{"status": "ok"}`.
 
+## Public read API
+
+Two read-only endpoints, open to anonymous clients:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/entities/` | compact collection: `id`, `slug`, `name`, `entity_type`, `category` |
+| `GET /api/entities/{slug}/` | full entity: common fields, reference data, type profile, relations and documentary sources |
+
+### Visibility rule
+
+An entity is publicly visible **if and only if** its editorial status is
+`published` **and** it has not been logically deleted. This single rule
+applies to both endpoints and to every caller — anonymous, authenticated, or
+superuser. These are public routes, not private management routes; the Django
+admin remains the way to reach unpublished records.
+
+A non-public entity and an unknown slug return the **same** `404`, with the
+same body. The response never reveals that a record exists, nor its editorial
+status.
+
+### Nested references follow the same rule
+
+- `variant_of` is an object when the referenced figure is public, and `null`
+  otherwise. A hidden reference leaks neither id, slug, name nor type.
+- `relations` keeps links whose resolved target is public, and keeps links
+  that were already unresolved (`to_entity: null`, `to_name` filled). A link
+  pointing to a non-public resolved target is **omitted entirely** — id, kind
+  and notes included. Its name is never copied into `to_name`, which would
+  republish the hidden target under another form.
+- A public target is only ever rendered as the four-field synthetic
+  reference; the detail is never nested recursively.
+
+These rules cover structured references. They do not censor names appearing
+in the public narrative text, nor in a genuinely unresolved relation:
+reviewing the text itself is editorial work.
+
+### Expect an empty collection on a fresh database
+
+Entities are created as `draft`, both by the admin and by the pilot import.
+Until a record is explicitly published, `GET /api/entities/` legitimately
+returns `[]` and every detail URL returns `404`. That is the intended
+behaviour, not a misconfiguration.
+
+### Not available yet
+
+Pagination, filtering, search and the OpenAPI schema with Swagger or ReDoc
+are not implemented. Neither are authentication, JWT, write operations and
+the moderation workflow. Every HTTP write method is refused with `405`.
+
 ## Pilot corpus import
 
 A management command imports a small pilot selection from the historical V2
@@ -111,6 +161,10 @@ and geographic reference models, cultural variants, relations between figures,
 documentary sources, editorial state fields, the Django admin, a read-only
 list/detail API, and the pilot corpus import described above.
 
-The API is currently **read-only and open** — no authentication, no editorial
-status filtering. Authentication, object-level permissions, write operations
-and the moderation workflow are planned for a later phase.
+Phase 3 in progress: the public read contract now exposes only published,
+non-deleted entities, and hides non-public nested references.
+
+The API is **read-only** — every write method returns `405`. Authentication,
+object-level permissions, write operations and the moderation workflow are
+planned for a later phase, as are pagination, filtering, search and the
+OpenAPI schema.

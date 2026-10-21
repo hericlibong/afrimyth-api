@@ -35,28 +35,28 @@ class EntityType(models.TextChoices):
     `Entity.category`, qui est un sous-titre éditorial libre.
     """
 
-    DIVINITY = "divinity", "Divinité"
-    HERO = "hero", "Héros"
-    CREATURE = "creature", "Créature"
+    DIVINITY = "divinity", "Divinity"
+    HERO = "hero", "Hero"
+    CREATURE = "creature", "Creature"
 
 
 class Gender(models.TextChoices):
     """Genre de la figure, limité aux valeurs observées dans le corpus."""
 
-    MALE = "male", "Masculin"
-    FEMALE = "female", "Féminin"
-    NEUTRAL = "neutral", "Neutre"
-    ANDROGYNOUS = "androgynous", "Androgyne"
-    FLUID = "fluid", "Fluide"
+    MALE = "male", "Male"
+    FEMALE = "female", "Female"
+    NEUTRAL = "neutral", "Neutral"
+    ANDROGYNOUS = "androgynous", "Androgynous"
+    FLUID = "fluid", "Fluid"
 
 
 class ThreatLevel(models.TextChoices):
     """Niveau de menace d'une créature, facultatif."""
 
-    LOW = "low", "Faible"
-    MEDIUM = "medium", "Modéré"
-    HIGH = "high", "Élevé"
-    MYTHIC = "mythic", "Mythique"
+    LOW = "low", "Low"
+    MEDIUM = "medium", "Moderate"
+    HIGH = "high", "High"
+    MYTHIC = "mythic", "Mythic"
 
 
 class CulturalAreaKind(models.TextChoices):
@@ -142,8 +142,8 @@ def wrong_entity_type_error(profile_label: str, expected: str) -> ValidationErro
     return ValidationError(
         {
             "entity": (
-                f"Un {profile_label} ne peut être rattaché qu'à une entité "
-                f"de type « {expected} »."
+                f"A {profile_label} can only be attached to an entity of type "
+                f"'{expected}'."
             )
         }
     )
@@ -171,8 +171,8 @@ class CulturalArea(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "aire culturelle"
-        verbose_name_plural = "aires culturelles"
+        verbose_name = "cultural area"
+        verbose_name_plural = "cultural areas"
         constraints = [
             models.CheckConstraint(
                 condition=~Q(parent=F("id")),
@@ -219,8 +219,8 @@ class Country(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "pays"
-        verbose_name_plural = "pays"
+        verbose_name = "country"
+        verbose_name_plural = "countries"
         constraints = [
             models.UniqueConstraint(
                 fields=["iso_code"],
@@ -291,8 +291,8 @@ class Ethnicity(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "ethnie"
-        verbose_name_plural = "ethnies"
+        verbose_name = "ethnicity"
+        verbose_name_plural = "ethnicities"
 
     def __str__(self) -> str:
         return self.name
@@ -310,8 +310,8 @@ class Domain(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "domaine"
-        verbose_name_plural = "domaines"
+        verbose_name = "domain"
+        verbose_name_plural = "domains"
 
     def __str__(self) -> str:
         return self.name
@@ -342,7 +342,7 @@ class Entity(models.Model):
     category = models.CharField(
         max_length=255,
         blank=True,
-        help_text="Sous-titre éditorial libre, par exemple « Orisha of Lightning ».",
+        help_text="Free editorial subtitle, for example 'Orisha of Lightning'.",
     )
     gender = models.CharField(max_length=20, choices=Gender.choices)
     cultural_role = models.CharField(max_length=255, blank=True)
@@ -476,8 +476,8 @@ class Entity(models.Model):
 
     class Meta:
         ordering = ["name"]
-        verbose_name = "entité"
-        verbose_name_plural = "entités"
+        verbose_name = "entity"
+        verbose_name_plural = "entities"
         constraints = [
             models.UniqueConstraint(
                 fields=["name", "entity_type"],
@@ -531,11 +531,11 @@ class DivinityProfile(models.Model):
     cult_festivals = string_array()
 
     class Meta:
-        verbose_name = "profil de divinité"
-        verbose_name_plural = "profils de divinité"
+        verbose_name = "divinity profile"
+        verbose_name_plural = "divinity profiles"
 
     def __str__(self) -> str:
-        return f"Profil de divinité — {self.entity.name}"
+        return f"Divinity profile — {self.entity.name}"
 
     def clean(self) -> None:
         """Interdit de rattacher ce profil à une entité d'un autre type.
@@ -552,7 +552,7 @@ class DivinityProfile(models.Model):
             self.entity_id is not None
             and self.entity.entity_type != EntityType.DIVINITY
         ):
-            raise wrong_entity_type_error("profil de divinité", EntityType.DIVINITY)
+            raise wrong_entity_type_error("divinity profile", EntityType.DIVINITY)
 
 
 class HeroProfile(models.Model):
@@ -576,17 +576,17 @@ class HeroProfile(models.Model):
     historical_context = models.TextField(blank=True)
 
     class Meta:
-        verbose_name = "profil de héros"
-        verbose_name_plural = "profils de héros"
+        verbose_name = "hero profile"
+        verbose_name_plural = "hero profiles"
 
     def __str__(self) -> str:
-        return f"Profil de héros — {self.entity.name}"
+        return f"Hero profile — {self.entity.name}"
 
     def clean(self) -> None:
         """Interdit de rattacher ce profil à une entité d'un autre type."""
         super().clean()
         if self.entity_id is not None and self.entity.entity_type != EntityType.HERO:
-            raise wrong_entity_type_error("profil de héros", EntityType.HERO)
+            raise wrong_entity_type_error("hero profile", EntityType.HERO)
 
 
 class CreatureProfile(models.Model):
@@ -629,11 +629,11 @@ class CreatureProfile(models.Model):
     )
 
     class Meta:
-        verbose_name = "profil de créature"
-        verbose_name_plural = "profils de créatures"
+        verbose_name = "creature profile"
+        verbose_name_plural = "creature profiles"
 
     def __str__(self) -> str:
-        return f"Profil de créature — {self.entity.name}"
+        return f"Creature profile — {self.entity.name}"
 
     def clean(self) -> None:
         """Interdit de rattacher ce profil à une entité d'un autre type."""
@@ -642,7 +642,7 @@ class CreatureProfile(models.Model):
             self.entity_id is not None
             and self.entity.entity_type != EntityType.CREATURE
         ):
-            raise wrong_entity_type_error("profil de créature", EntityType.CREATURE)
+            raise wrong_entity_type_error("creature profile", EntityType.CREATURE)
 
 
 class EntityRelation(models.Model):
@@ -688,8 +688,8 @@ class EntityRelation(models.Model):
 
     class Meta:
         ordering = ["kind", "to_name", "id"]
-        verbose_name = "relation entre entités"
-        verbose_name_plural = "relations entre entités"
+        verbose_name = "entity relation"
+        verbose_name_plural = "entity relations"
         constraints = [
             # Exactement une cible : soit la fiche, soit le nom, jamais les
             # deux ni aucune.
@@ -799,8 +799,8 @@ class Source(models.Model):
         # légitimes. Écarter les doublons relève du contrôle éditorial, pas de
         # la structure de la base.
         ordering = ["label", "id"]
-        verbose_name = "source documentaire"
-        verbose_name_plural = "sources documentaires"
+        verbose_name = "documentary source"
+        verbose_name_plural = "documentary sources"
 
     def __str__(self) -> str:
         return f"{self.label} ({self.kind}) — {self.entity.name}"

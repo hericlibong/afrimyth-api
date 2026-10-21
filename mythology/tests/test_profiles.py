@@ -40,7 +40,7 @@ def test_creation_d_un_profil_de_heros() -> None:
     assert profile.entity == hero
     assert profile.titles == ["Roi du Mali"]
     assert profile.legacy == "Fondateur de l'empire du Mali."
-    assert str(profile) == "Profil de héros — Soundiata"
+    assert str(profile) == "Hero profile — Soundiata"
 
 
 def test_profil_de_heros_vide_par_defaut() -> None:
@@ -79,7 +79,7 @@ def test_creation_d_un_profil_de_creature() -> None:
     assert profile.entity == creature
     assert profile.habitat == ["Marais du bassin du Congo"]
     assert profile.threat_level == ThreatLevel.HIGH
-    assert str(profile) == "Profil de créature — Mokele-mbembe"
+    assert str(profile) == "Creature profile — Mokele-mbembe"
 
 
 def test_profil_de_creature_vide_par_defaut() -> None:

@@ -152,7 +152,11 @@ REST_FRAMEWORK = {
 
 # --- Internationalisation -----------------------------------------------------
 
-LANGUAGE_CODE = "fr-fr"
+# L'anglais est la langue du produit public, conformément à l'ADR 0003 : les
+# messages standards de Django et de DRF rendus par l'API — dont les 404 et
+# 405 — doivent être en anglais. Le travail interne reste en français.
+# Aucun middleware de langue, aucune architecture i18n n'est ajouté.
+LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True

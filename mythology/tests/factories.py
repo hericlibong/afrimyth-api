@@ -15,6 +15,7 @@ from mythology.models import (
     Domain,
     Entity,
     EntityRelation,
+    EntityStatus,
     EntityType,
     Ethnicity,
     Gender,
@@ -40,6 +41,28 @@ def create_entity(
         gender=gender,
         **extra,
     )
+
+
+def create_published_entity(**extra: Any) -> Entity:
+    """Crée une entité **publiée**, donc visible de l'API publique.
+
+    Factory distincte, et non changement du défaut de `create_entity` : le
+    statut par défaut du modèle reste `draft`, et les tests qui vérifient ce
+    défaut — modèles, service, import — doivent continuer de le constater.
+    Les tests de lecture publique publient donc explicitement.
+    """
+    return create_entity(status=EntityStatus.PUBLISHED, **extra)
+
+
+def publish(entity: Entity) -> Entity:
+    """Publie une fiche déjà créée, dans la base de test uniquement.
+
+    Utile après un import, qui crée volontairement en `draft` : la lecture
+    publique ne peut être exercée qu'une fois la fiche publiée.
+    """
+    entity.status = EntityStatus.PUBLISHED
+    entity.save(update_fields=["status"])
+    return entity
 
 
 def create_divinity_profile(entity: Entity, **extra: Any) -> DivinityProfile:
