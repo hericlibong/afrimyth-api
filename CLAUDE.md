@@ -69,8 +69,14 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 
 ## Hors périmètre à ce stade
 
-Docker, CI, authentification JWT, et tout contenu issu d'un dossier `_audit`
-(à ne jamais recopier).
+Docker, CI, authentification JWT.
+
+**Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
+corpus complet dans ce dépôt. En revanche, **lire** un fichier de données
+externe situé dans `_audit` est autorisé lorsqu'un import le demande
+explicitement : le chemin est alors passé en argument de commande, jamais
+codé en dur, et les tests committés restent autonomes avec des données
+synthétiques.
 
 **Rendu visuel et génération d'images.** Les modèles ne portent que des faits
 mythologiques. Les données de rendu — prompt canonique, variantes de prompt,
