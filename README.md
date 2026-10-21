@@ -53,8 +53,88 @@ Two read-only endpoints, open to anonymous clients:
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/entities/` | compact collection: `id`, `slug`, `name`, `entity_type`, `category` |
+| `GET /api/entities/` | paginated collection of compact items: `id`, `slug`, `name`, `entity_type`, `category` |
 | `GET /api/entities/{slug}/` | full entity: common fields, reference data, type profile, relations and documentary sources |
+
+### Pagination
+
+The collection is paginated with a **fixed page size of 20**, selected with
+`?page=`. The response is the standard DRF envelope:
+
+```json
+{
+  "count": 45,
+  "next": "http://127.0.0.1:8000/api/entities/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "id": "8a71ca00-f976-4d34-82b1-9b8a327e2ca6",
+      "slug": "anansi",
+      "name": "Anansi",
+      "entity_type": "hero",
+      "category": "Trickster Spirit"
+    }
+  ]
+}
+```
+
+- `count` counts only the public entities matching the current search and
+  filters — never private or deleted records.
+- `next` and `previous` keep every search and filter parameter, so paging
+  through a filtered collection is safe.
+- Results are ordered by `name`, then by `id` to break ties between
+  identically named figures. Without that tiebreaker a record could move
+  between pages from one request to the next.
+- A non-existent or malformed `page` returns `404`, the standard DRF
+  behaviour.
+- The client cannot change the page size.
+
+The detail endpoint and the health endpoint are **not** paginated and keep
+their previous shape.
+
+### Search and filters
+
+These parameters select the **collection only**. They never change whether a
+detail URL is available: `/api/entities/{slug}/` depends solely on the public
+visibility of that slug.
+
+| Parameter | Meaning |
+|---|---|
+| `search` | Case-insensitive search in `name`, `category`, `cultural_role` and `story_description`. Internal review notes, documentary sources and related entities are **not** searched. |
+| `entity_type` | Exact value: `divinity`, `hero` or `creature`. |
+| `country` | Two-letter ISO 3166-1 alpha-2 code, normalised to upper case. Matches the **primary or a secondary** country. |
+| `cultural_area` | Area slug. Matches a **primary or secondary** attachment to that area **or to any of its descendants**. |
+
+Parameters combine with **AND**; the two attachments of a single filter
+combine with **OR**. An entity matching through several attachments appears
+only once, and is counted once. An empty parameter does not filter.
+
+Area descendants are resolved from the hierarchy actually stored in `parent`,
+with no region name hard-coded. `?cultural_area=central-africa` therefore
+includes an entity attached to `congo-basin`, and this works at any depth.
+Filtering by area never infers a country.
+
+```
+GET /api/entities/?entity_type=divinity
+GET /api/entities/?country=CD&entity_type=creature
+GET /api/entities/?cultural_area=central-africa
+GET /api/entities/?search=anansi
+GET /api/entities/?entity_type=hero&page=2
+```
+
+### Errors
+
+| Situation | Response |
+|---|---|
+| Unknown `entity_type` | `400` — `{"entity_type": ["Unknown entity type 'titan'. Expected one of: divinity, hero, creature."]}` |
+| Malformed `country` | `400` — `{"country": ["Invalid country code 'NGA'. Expected a two-letter ISO 3166-1 alpha-2 code, for example 'NG'."]}` |
+| Well-formed but unknown `country` | `200` with an empty collection |
+| Unknown `cultural_area` slug | `200` with an empty collection |
+| Non-existent `page` | `404` |
+
+An unknown country code or area slug deliberately returns an empty
+collection rather than an error: the response must not reveal which countries
+or areas are recorded.
 
 ### Visibility rule
 
@@ -93,9 +173,9 @@ behaviour, not a misconfiguration.
 
 ### Not available yet
 
-Pagination, filtering, search and the OpenAPI schema with Swagger or ReDoc
-are not implemented. Neither are authentication, JWT, write operations and
-the moderation workflow. Every HTTP write method is refused with `405`.
+The OpenAPI schema with Swagger or ReDoc is not implemented, nor are
+authentication, JWT, write operations and the moderation workflow. Every HTTP
+write method is refused with `405`.
 
 ## Pilot corpus import
 
@@ -161,10 +241,10 @@ and geographic reference models, cultural variants, relations between figures,
 documentary sources, editorial state fields, the Django admin, a read-only
 list/detail API, and the pilot corpus import described above.
 
-Phase 3 in progress: the public read contract now exposes only published,
-non-deleted entities, and hides non-public nested references.
+Phase 3 in progress: the public read contract exposes only published,
+non-deleted entities and hides non-public nested references, and the
+collection is now paginated, searchable and filterable.
 
 The API is **read-only** — every write method returns `405`. Authentication,
 object-level permissions, write operations and the moderation workflow are
-planned for a later phase, as are pagination, filtering, search and the
-OpenAPI schema.
+planned for a later phase, as is the OpenAPI schema.

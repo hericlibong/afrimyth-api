@@ -125,7 +125,7 @@ def test_liste_est_compacte_et_publique(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert len(payload) == 1
     assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
     assert payload[0]["slug"] == "shango"
@@ -149,7 +149,7 @@ def test_liste_n_expose_aucun_profil(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert len(payload) == 3
     for item in payload:
         assert set(item) == {"id", "slug", "name", "entity_type", "category"}
@@ -167,7 +167,7 @@ def test_liste_n_expose_aucun_referentiel(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert len(payload) == 1
     assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
     assert not REFERENCE_KEYS & set(payload[0])
@@ -261,7 +261,7 @@ def test_liste_n_expose_ni_variante_ni_relations(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert len(payload) == 2
     for item in payload:
         assert set(item) == {"id", "slug", "name", "entity_type", "category"}
@@ -379,7 +379,7 @@ def test_liste_n_expose_pas_les_sources(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert len(payload) == 1
     assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
     assert "sources" not in payload[0]
@@ -474,7 +474,7 @@ def test_liste_ne_divulgue_aucun_champ_interne(client: Client) -> None:
     response = client.get(reverse("entity-list"))
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["results"]
     assert set(payload[0]) == {"id", "slug", "name", "entity_type", "category"}
     assert not INTERNAL_KEYS & set(payload[0])
 
@@ -512,7 +512,7 @@ def test_seule_une_fiche_publiee_est_visible(client: Client, status: str) -> Non
     liste = client.get(reverse("entity-list"))
     detail = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
 
-    assert len(liste.json()) == (1 if visible else 0)
+    assert liste.json()["count"] == (1 if visible else 0)
     assert detail.status_code == (200 if visible else 404)
 
 
@@ -529,7 +529,7 @@ def test_fiche_supprimee_disparait_de_la_liste(client: Client) -> None:
 
     response = client.get(reverse("entity-list"))
 
-    slugs = [item["slug"] for item in response.json()]
+    slugs = [item["slug"] for item in response.json()["results"]]
     assert slugs == [visible.slug]
 
 

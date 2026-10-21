@@ -119,7 +119,8 @@ def test_un_utilisateur_connecte_ne_contourne_pas_la_regle(client: Client) -> No
     liste = client.get(reverse("entity-list"))
     detail = client.get(reverse("entity-detail", kwargs={"slug": cache.slug}))
 
-    assert liste.json() == []
+    assert liste.json()["count"] == 0
+    assert liste.json()["results"] == []
     assert detail.status_code == 404
 
 
@@ -136,7 +137,8 @@ def test_un_superutilisateur_ne_contourne_pas_la_regle(client: Client) -> None:
     liste = client.get(reverse("entity-list"))
     detail = client.get(reverse("entity-detail", kwargs={"slug": cache.slug}))
 
-    assert liste.json() == []
+    assert liste.json()["count"] == 0
+    assert liste.json()["results"] == []
     assert detail.status_code == 404
 
 

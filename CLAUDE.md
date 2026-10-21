@@ -57,9 +57,13 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
     publique ; contrat d'API : noms de champs, valeurs techniques,
     descriptions et messages destinés aux clients ; futur schéma OpenAPI et
     ses interfaces Swagger ou ReDoc ; contenu canonique du corpus, y compris
-    les noms et les descriptions importés.
-  - **En français** — commentaires et docstrings internes ; prompts ; rapports
+    les noms et les descriptions importés ; toutes les docstrings du code,
+    y compris celles des modules, classes, fonctions et tests internes.
+  - **En français** — commentaires internes hors docstrings ; prompts ; rapports
     de `docs/reports/` ; documentation interne.
+  - Les nouvelles docstrings sont en anglais. La traduction des docstrings
+    françaises existantes est reportée à une passe documentaire avant la
+    livraison V1, sans changement fonctionnel (précision de l'ADR 0003).
   - **Aucune internationalisation n'est ajoutée à ce stade** : pas de tables de
     traduction, pas de champs suffixés par langue, pas de `gettext` sur les
     chaînes publiques.
