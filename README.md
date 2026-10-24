@@ -58,6 +58,9 @@ without logging in, like the API they describe.
 | `/api/docs/` | Swagger UI — browse the endpoints and run requests with **Try it out** |
 | `/api/redoc/` | ReDoc — a reading-oriented rendering of the same schema |
 
+The schema itself is public, including the authentication endpoints: a client
+has to be able to read how to obtain a token before it holds one.
+
 No generated schema file is committed: the schema is produced from the code at request time.
 To generate and validate it locally:
 
@@ -74,8 +77,15 @@ are `GET` and need no credentials.
 Expand an operation, press **Try it out**, optionally fill the collection's
 query parameters, then **Execute**. On a database holding only unpublished
 drafts, the collection answers `200` with zero results and any detail slug
-answers `404` — see the visibility rule below. Write methods are not offered,
-because none exists.
+answers `404` — see the visibility rule below. No write method is offered on
+entities, because none exists.
+
+**Authenticating in Swagger UI.** Only `GET /api/auth/me/` requires a token.
+Run `POST /api/auth/token/` first, copy the `access` value from the response,
+press **Authorize**, paste it, then execute `me`. Paste the token alone:
+Swagger adds the `Bearer ` prefix itself. The other operations stay available
+whether or not you are authorised — authenticating changes nothing about what
+they return.
 
 **CDN dependency.** Swagger UI and ReDoc load their JavaScript and CSS from a
 public CDN. Without internet access the HTML page is still served but will
@@ -210,8 +220,119 @@ behaviour, not a misconfiguration.
 
 ### Not available yet
 
-Authentication, JWT, write operations and the moderation workflow are not
-implemented. Every HTTP write method is refused with `405`.
+Write operations and the moderation workflow are not implemented. Every HTTP
+write method on `/api/entities/` is refused with `405`, whether or not a token
+is supplied.
+
+## Authentication
+
+Three endpoints issue, refresh and verify JSON Web Tokens. They are the only
+`POST` operations in the API, and they create no content.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/token/` | none | Exchange credentials for a token pair |
+| `POST` | `/api/auth/token/refresh/` | none | Exchange a refresh token for a new access token |
+| `GET` | `/api/auth/me/` | access token | Return the caller's own identity |
+
+### Obtain a token pair
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/token/ \
+  -H "Content-Type: application/json" \
+  -d '{"username": "<username>", "password": "<password>"}'
+```
+
+```json
+{
+  "access": "eyJhbGciOi...",
+  "refresh": "eyJhbGciOi..."
+}
+```
+
+- **`access`** lives 5 minutes and is sent on every request that needs
+  authentication.
+- **`refresh`** lives 1 day and is sent **only** to the refresh endpoint.
+
+The two are not interchangeable: a refresh token is refused as an access
+token, and an access token is refused as a refresh token.
+
+Errors: `400` when `username` or `password` is missing, `401` when the
+credentials are refused. The `401` body is identical whether the account does
+not exist, the password is wrong, or the account is inactive — it never
+reveals which.
+
+### Use the access token
+
+```bash
+curl http://127.0.0.1:8000/api/auth/me/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+```json
+{"id": 1, "username": "example-contributor"}
+```
+
+The response carries `id` and `username` only. Email address, password hash,
+permissions, group membership and administrative flags are deliberately not
+exposed.
+
+`401` is returned when no token is sent, or when the token is malformed,
+expired, signed with another key, is a refresh token, or belongs to an account
+that has since been deactivated or deleted. This endpoint accepts JWT only: an
+open administration session is not enough, because its purpose is to prove
+that a *token* works.
+
+### Refresh the access token
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/token/refresh/ \
+  -H "Content-Type: application/json" \
+  -d '{"refresh": "<refresh token>"}'
+```
+
+```json
+{"access": "eyJhbGciOi..."}
+```
+
+No `Authorization` header is needed: the refresh token in the body *is* the
+credential. The response carries a new `access` and nothing else — rotation is
+disabled, so the client keeps the refresh token it already has.
+
+### Authentication is not authorisation
+
+Being authenticated grants **no** additional access at this stage. Reading
+entities is anonymous, and a valid token reveals nothing a stranger cannot
+already see: drafts and deleted records stay hidden, and writes stay refused.
+Role-based authorisation will arrive with write operations, carried by Django
+groups checked server-side.
+
+### Caveats
+
+- **No revocation.** Rotation and token blacklisting are not enabled.
+  Refreshing does not invalidate the previous access token, which stays usable
+  until it expires on its own, and discarding a token in your client does not
+  cancel it server-side. There is no logout endpoint, and none is implied. A
+  compromised token therefore stays valid for up to its lifetime — 5 minutes
+  for an access token, 1 day for a refresh token.
+- **Use HTTPS outside localhost.** Tokens are bearer credentials: anyone
+  holding one is the account until it expires. Over plain HTTP they travel in
+  clear text and can be captured and replayed. The same applies to the
+  password sent to the token endpoint.
+- **No brute-force protection.** The token endpoint has no rate limit, no
+  attempt counter and no lockout. On a public deployment, throttling has to be
+  added — DRF throttling, a reverse proxy, or both.
+- **Signing key.** Tokens are signed with HS256 using `DJANGO_SECRET_KEY`.
+  Rotating that key invalidates every token in circulation. Use a key of at
+  least 32 bytes: a shorter one is accepted but weakens the signature, and
+  PyJWT warns about it.
+- **An invalid `Authorization` header breaks public reads too.** DRF
+  authenticates before it checks permissions, so a stale or mistyped Bearer
+  header produces `401` even on an endpoint that needs no authentication at
+  all. If a public read suddenly fails, remove the header before suspecting
+  the API.
+- **No self-service.** There is no registration endpoint and no password
+  reset. Accounts are created through the Django administration.
 
 ## Pilot corpus import
 
@@ -282,6 +403,7 @@ published, non-deleted entities and hides non-public nested references, the
 collection is paginated, searchable and filterable, and the contract is
 published as an OpenAPI schema with Swagger UI and ReDoc.
 
-The API is **read-only** — every write method returns `405`. Authentication,
-object-level permissions, write operations and the moderation workflow are
-planned for a later phase.
+Mythological content remains **read-only**: its write methods return `405`.
+JWT token issuance, refresh and the protected identity route were validated
+in phase 4 increment 1, including manual Postman exercises. Object-level permissions,
+content write operations and the moderation workflow are not implemented yet.

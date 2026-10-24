@@ -30,6 +30,9 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
   incrément nomme explicitement ce qu'il laisse de côté.
 - **Pas d'abstraction anticipée.** Pas de couche service/repository générique,
   pas de `BaseModel`, pas de mixins spéculatifs. Du Django idiomatique.
+  Réutiliser les validations des bibliothèques plutôt que les vérifier deux
+  fois. Éviter fonctions auxiliaires et assertions redondantes ; conserver
+  les protections de sécurité et tests de contrat réellement utiles.
   En revanche, une **fonction métier concrètement demandée** est légitime
   lorsqu'une règle ne peut pas être portée par un modèle seul : ainsi
   `mythology/services.py`, prévu par la décision 6 de l'ADR 0002 pour
@@ -75,7 +78,15 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 
 ## Hors périmètre à ce stade
 
-Docker, CI, authentification JWT.
+Docker, CI.
+
+**Authentification.** JWT est en place depuis la phase 4 : trois routes sous
+`/api/auth/` (obtention, renouvellement, identité), par Simple JWT. Restent
+hors périmètre la rotation des jetons, la liste de révocation, la
+déconnexion, l'inscription en libre-service et la réinitialisation de mot de
+passe. Surtout : être authentifié n'ouvre **aucun** accès supplémentaire au
+corpus — l'autorisation viendra avec l'écriture, portée par des groupes
+Django vérifiés côté serveur.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données

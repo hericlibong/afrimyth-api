@@ -8,6 +8,7 @@ du dépôt est chargé automatiquement (voir `.env.example`).
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -55,6 +56,11 @@ ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 # --- Applications -------------------------------------------------------------
 
 INSTALLED_APPS = [
+    # **En premier, volontairement.** `ready()` de cette app applique le
+    # correctif de typage avant que l'autodiscover de l'administration
+    # importe `mythology/admin.py`, qui indexe des classes génériques. Voir
+    # `config/apps.py` pour le détail.
+    "config.apps.TypingPatchConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -134,14 +140,42 @@ AUTH_PASSWORD_VALIDATORS = [
 # --- Django REST Framework ----------------------------------------------------
 
 REST_FRAMEWORK = {
+    # JWT d'abord : c'est le mécanisme des clients d'API. La session reste
+    # ensuite, pour l'API navigable de DRF et l'administration.
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
+    # Défaut fermé : toute vue qui n'ouvre pas explicitement l'accès exige une
+    # authentification. Les vues publiques déclarent `AllowAny` une par une.
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
     # drf-spectacular remplace le générateur de schéma par défaut de DRF.
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+
+# --- Jetons JWT ---------------------------------------------------------------
+
+# Durées délibérément courtes pour un premier incrément : un accès de cinq
+# minutes limite la fenêtre d'un jeton intercepté, et un renouvellement d'un
+# jour évite de se reconnecter sans cesse pendant les essais.
+#
+# Ni rotation, ni liste de révocation, ni route de déconnexion ne sont
+# activées. **Conséquence à connaître** : renouveler n'invalide pas l'accès
+# précédent, qui reste valable jusqu'à son expiration, et supprimer un jeton
+# côté client ne le révoque pas côté serveur. Il n'y a donc aucune promesse
+# de déconnexion ni de révocation immédiate à ce stade.
+#
+# La signature reprend le réglage standard de la bibliothèque : HS256 avec
+# `SECRET_KEY`. Aucun secret supplémentaire, aucun rôle métier dans les
+# claims — les autorisations viendront des groupes Django, pas du jeton.
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
 }
 
 
@@ -168,11 +202,28 @@ SPECTACULAR_SETTINGS = {
         "the referenced figure is not public, and a relation whose resolved "
         "target is not public is omitted entirely — its name is never copied "
         "into `to_name`.\n\n"
-        "## Read-only\n\n"
-        "Only `GET` is available. `POST`, `PUT`, `PATCH` and `DELETE` are "
-        "refused with `405 Method Not Allowed`. Authentication, write "
-        "operations and the moderation workflow are planned for a later "
-        "phase and are **not** part of this contract.\n\n"
+        "## Read-only content\n\n"
+        "Mythological content is read-only. On `/api/entities/`, only `GET` is "
+        "available; `POST`, `PUT`, `PATCH` and `DELETE` are refused with "
+        "`405 Method Not Allowed`. Write operations and the moderation "
+        "workflow are planned for a later phase and are **not** part of this "
+        "contract.\n\n"
+        "The `/api/auth/` endpoints are the exception: issuing and refreshing "
+        "a token are `POST` operations, because they carry credentials in the "
+        "request body. They create no content.\n\n"
+        "## Authentication\n\n"
+        "`POST /api/auth/token/` exchanges a username and password for an "
+        "access token and a refresh token. The access token is then sent as "
+        "`Authorization: Bearer <access token>`, and "
+        "`POST /api/auth/token/refresh/` issues a new one when it expires.\n\n"
+        "Authentication is **not** required to read entities, and it currently "
+        "grants no additional access: it is not authorisation. "
+        "`GET /api/auth/me/` is the only endpoint that requires a token, and "
+        "it exists to let a client verify that its token works.\n\n"
+        "Tokens cannot be revoked at this stage. Refreshing does not "
+        "invalidate the previous access token, and discarding a token on the "
+        "client does not cancel it on the server: it stays valid until it "
+        "expires. There is no logout endpoint.\n\n"
         "## Expect an empty collection\n\n"
         "Entities are created as drafts. Until a record is explicitly "
         "published, the collection legitimately returns zero results and "
@@ -205,6 +256,10 @@ SPECTACULAR_SETTINGS = {
     },
     "TAGS": [
         {"name": "entities", "description": "Public read access to figures."},
+        {
+            "name": "authentication",
+            "description": "Token issuance, refresh and identity check.",
+        },
         {"name": "service", "description": "Operational endpoints."},
     ],
 }
@@ -230,21 +285,20 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- Correctif de typage ------------------------------------------------------
 
-# Les classes génériques de Django et de DRF ne le sont que pour les stubs.
-# Ce correctif les rend indexables à l'exécution, afin que le code puisse être
-# annoté — `ModelAdmin[Entity]`, `ModelSerializer[Entity]` — sous mypy strict.
+# Aucun import de DRF ici. Le correctif de typage vit désormais dans
+# `config/apps.py`, appliqué par le `ready()` de `TypingPatchConfig`, placé en
+# premier dans `INSTALLED_APPS`.
 #
-# **Il doit rester en fin de fichier.** Importer `rest_framework.generics`
-# évalue `api_settings.DEFAULT_FILTER_BACKENDS` dans le corps de
-# `GenericAPIView`, ce qui fait lire et mettre en cache `REST_FRAMEWORK`.
-# Placé en tête, cet import survenait avant la définition du réglage, et DRF
-# mémorisait un dictionnaire vide : tous nos réglages étaient alors ignorés,
-# dont `DEFAULT_PERMISSION_CLASSES`, qui retombait silencieusement sur le
-# défaut ouvert `AllowAny`. Un test garde ce comportement.
-import django_stubs_ext  # noqa: E402
-from rest_framework.generics import GenericAPIView  # noqa: E402
-from rest_framework.serializers import BaseSerializer  # noqa: E402
-
-django_stubs_ext.monkeypatch(extra_classes=[BaseSerializer, GenericAPIView])
+# Deux raisons, toutes deux constatées :
+#
+# 1. placé en **tête** de ce fichier, l'import de `rest_framework.generics`
+#    faisait lire `REST_FRAMEWORK` avant sa définition, et DRF mémorisait un
+#    dictionnaire vide — `DEFAULT_PERMISSION_CLASSES` retombait alors
+#    silencieusement sur le défaut ouvert `AllowAny` ;
+# 2. placé en **fin** de ce fichier, le même import résout désormais
+#    `JWTAuthentication`, qui importe `django.contrib.auth.models` avant que
+#    le registre d'applications soit prêt — `AppRegistryNotReady`.
+#
+# Un test de non-régression garde les valeurs effectivement appliquées.
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

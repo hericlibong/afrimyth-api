@@ -80,6 +80,9 @@ def test_schema_generation_does_not_need_published_data(
         "/api/health/",
         "/api/entities/",
         "/api/entities/{slug}/",
+        "/api/auth/token/",
+        "/api/auth/token/refresh/",
+        "/api/auth/me/",
     }
 
 
@@ -99,10 +102,28 @@ def test_redoc_uses_a_pinned_classic_script(client: Client) -> None:
 # --- Paths and methods --------------------------------------------------
 
 
-def test_only_get_is_declared(schema: dict[str, Any]) -> None:
-    """No write operation is advertised anywhere in the schema."""
-    for path, operations in schema["paths"].items():
+def test_content_paths_only_declare_get(schema: dict[str, Any]) -> None:
+    """No write operation is advertised on mythological content.
+
+    The authentication paths are excluded on purpose: they carry credentials
+    in a request body and therefore have to be POST. They create no content,
+    so this test still proves that nothing can be written to the corpus
+    through a documented operation.
+    """
+    content_paths = {
+        path for path in schema["paths"] if not path.startswith("/api/auth/")
+    }
+    assert content_paths  # garde-fou : un préfixe mal écrit viderait la boucle
+    for path in content_paths:
+        operations = schema["paths"][path]
         assert set(operations) == {"get"}, f"{path} declares more than GET"
+
+
+def test_authentication_paths_only_declare_post_or_get(schema: dict[str, Any]) -> None:
+    """Token issuance and refresh are POST; the identity check is GET."""
+    assert set(schema["paths"]["/api/auth/token/"]) == {"post"}
+    assert set(schema["paths"]["/api/auth/token/refresh/"]) == {"post"}
+    assert set(schema["paths"]["/api/auth/me/"]) == {"get"}
 
 
 def test_documentation_routes_are_not_in_the_schema(schema: dict[str, Any]) -> None:
@@ -111,16 +132,63 @@ def test_documentation_routes_are_not_in_the_schema(schema: dict[str, Any]) -> N
         assert path not in schema["paths"]
 
 
-def test_no_authentication_is_advertised(schema: dict[str, Any]) -> None:
-    """A client must not believe it has to authenticate to read.
+def test_no_authentication_is_advertised_except_on_me(schema: dict[str, Any]) -> None:
+    """Only the identity endpoint may advertise a security requirement.
 
-    Neither a global `security` requirement nor a per-operation one is
-    declared.
+    A global `security` entry would make Swagger present every read as
+    protected, which would be false: reading is anonymous, and obtaining a
+    token cannot itself require a token.
     """
     assert "security" not in schema
-    for operations in schema["paths"].values():
-        for operation in operations.values():
-            assert "security" not in operation
+    for path, operations in schema["paths"].items():
+        for method, operation in operations.items():
+            if path == "/api/auth/me/":
+                continue
+            assert "security" not in operation, f"{method.upper()} {path}"
+
+
+def test_token_responses_describe_their_payload(schema: dict[str, Any]) -> None:
+    """Simple JWT's own serializers are input-only; the 200 must still be described.
+
+    Without an explicit response serializer, drf-spectacular emits
+    "No response body" for both routes, which would tell a client nothing
+    about where to find its tokens.
+    """
+    pair = schema["paths"]["/api/auth/token/"]["post"]["responses"]["200"]
+    refresh = schema["paths"]["/api/auth/token/refresh/"]["post"]["responses"]["200"]
+
+    pair_schema = pair["content"]["application/json"]["schema"]
+    refresh_schema = refresh["content"]["application/json"]["schema"]
+
+    assert pair_schema["$ref"].endswith("/TokenPair")
+    assert refresh_schema["$ref"].endswith("/AccessToken")
+    assert set(schema["components"]["schemas"]["TokenPair"]["properties"]) == {
+        "access",
+        "refresh",
+    }
+    # Le renouvellement ne renvoie pas de nouveau `refresh` : la rotation est
+    # désactivée, et le schéma doit dire la même chose que l'API.
+    assert set(schema["components"]["schemas"]["AccessToken"]["properties"]) == {
+        "access"
+    }
+
+
+def test_token_requests_declare_their_credentials(schema: dict[str, Any]) -> None:
+    pair = schema["paths"]["/api/auth/token/"]["post"]["requestBody"]
+    body = pair["content"]["application/json"]["schema"]
+
+    assert body["$ref"].endswith("/TokenObtainPairRequest")
+    declared = schema["components"]["schemas"]["TokenObtainPairRequest"]["properties"]
+    assert set(declared) == {"username", "password"}
+
+
+def test_me_requires_a_bearer_token(schema: dict[str, Any]) -> None:
+    """Swagger must offer Bearer authentication for the identity endpoint."""
+    operation = schema["paths"]["/api/auth/me/"]["get"]
+    assert operation["security"] == [{"jwtAuth": []}]
+
+    scheme = schema["components"]["securitySchemes"]["jwtAuth"]
+    assert scheme == {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
 
 
 # --- List parameters ----------------------------------------------------
@@ -395,13 +463,44 @@ def test_no_internal_editorial_field_is_published(
         assert field not in properties, f"{field} leaked into {component}"
 
 
-def test_no_user_component_is_published(schema: dict[str, Any]) -> None:
-    """No account, email or user identity is described anywhere."""
-    serialized = json.dumps(schema["components"]["schemas"]).lower()
+def test_no_account_data_leaks_into_content_components(
+    schema: dict[str, Any],
+) -> None:
+    """Mythological components must not describe accounts.
 
+    `CurrentUser` and the two token serializers are excluded: they exist to
+    describe authentication and legitimately mention a username. Everything
+    else — entities, profiles, reference data, sources, relations — must say
+    nothing about accounts.
+    """
+    components = schema["components"]["schemas"]
+    authentication = {
+        "CurrentUser",
+        "TokenPair",
+        "TokenObtainPairRequest",
+        "AccessToken",
+        "TokenRefreshRequest",
+        "CredentialsError",
+        "FieldError",
+    }
+    content = {
+        name: body for name, body in components.items() if name not in authentication
+    }
+    assert content  # garde-fou : une faute de nom viderait la comparaison
+
+    serialized = json.dumps(content).lower()
     assert "password" not in serialized
     assert "email" not in serialized
     assert "username" not in serialized
+
+
+def test_the_identity_component_exposes_only_id_and_username(
+    schema: dict[str, Any],
+) -> None:
+    """`CurrentUser` must not grow into a profile endpoint by accident."""
+    component = schema["components"]["schemas"]["CurrentUser"]
+
+    assert set(component["properties"]) == {"id", "username"}
 
 
 # --- Examples -----------------------------------------------------------
@@ -452,3 +551,15 @@ def test_global_description_states_the_main_caveats(schema: dict[str, Any]) -> N
     assert "405" in description
     assert "drafts" in description
     assert "editorial review" in description
+
+
+def test_global_description_states_the_token_caveats(schema: dict[str, Any]) -> None:
+    """The absence of revocation and of authorisation must be stated."""
+    description = schema["info"]["description"]
+
+    assert "not authorisation" in description
+    assert "cannot be revoked" in description
+    assert "no logout endpoint" in description
+    # Les lectures restent anonymes : il faut le dire, sinon un client
+    # suppose qu'un jeton est nécessaire pour consulter le corpus.
+    assert "not** required to read entities" in description
