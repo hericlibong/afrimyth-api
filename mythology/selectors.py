@@ -1,19 +1,10 @@
-"""Sélections de lecture du domaine mythologique.
-
-Un seul endroit définit ce qu'« être publiquement visible » signifie, afin que
-la liste, le détail, les références imbriquées et les futures vues partagent
-la même règle. La roadmap de phase 3 demande explicitement cette
-centralisation, pour que la phase 4 puisse ajouter une sélection privée sans
-réécrire les serializers de lecture.
-
-Ce module ne contient ni moteur de permissions ni repository générique : des
-fonctions nommées, qui retournent des `QuerySet`.
-"""
+"""Public and role-based private read policies for mythology records."""
 
 from __future__ import annotations
 
 from django.db.models import Prefetch, Q, QuerySet
 
+from accounts.roles import ADMINISTRATOR, CONTRIBUTOR, REVIEWER
 from mythology.models import CulturalArea, Entity, EntityRelation, EntityStatus
 
 #: Condition de visibilité publique, exprimée une seule fois. Elle porte sur
@@ -78,26 +69,18 @@ def descendant_area_ids(slug: str) -> set[int]:
     return seen
 
 
-def filter_public_entities(
+def filter_entities(
     queryset: QuerySet[Entity],
     *,
     entity_type: str | None = None,
     country: str | None = None,
     cultural_area: str | None = None,
 ) -> QuerySet[Entity]:
-    """Applique les filtres de la collection publique.
+    """Restrict an already-authorised queryset using normalised filters.
 
-    Les trois paramètres se combinent par **ET**. À l'intérieur d'un filtre,
-    les rattachements principal et secondaire se combinent par **OU** : une
-    fiche correspond si l'un ou l'autre convient.
-
-    Un paramètre absent ou vide ne filtre rien. La validation des valeurs
-    — type inconnu, code pays mal formé — relève de l'appelant : cette
-    fonction suppose des valeurs déjà normalisées.
-
-    Le `distinct()` final est nécessaire : joindre une relation multiple
-    multiplie les lignes quand plusieurs rattachements correspondent, ce qui
-    produirait des doublons dans `results` **et** gonflerait `count`.
+    Filters combine with AND; primary and secondary attachments use OR.
+    Empty values do not filter. Validation belongs to the caller, and
+    `distinct()` prevents M2M joins from duplicating results or counts.
     """
     joined_many_to_many = False
 
@@ -149,36 +132,49 @@ def public_relations() -> QuerySet[EntityRelation]:
     )
 
 
+#: Jointures du détail, partagées par les deux politiques. `variant_of` est
+#: joint **sans condition** : la jointure ne décide pas de la visibilité,
+#: c'est le serializer qui masque une référence interdite. Le joindre ici
+#: permet à cette garde de s'exécuter sans requête supplémentaire.
+#:
+#: Les trois acteurs de la revue — `created_by`, `reviewed_by`, `deleted_by` —
+#: sont absents volontairement : la représentation privée n'expose que leur
+#: identifiant, que Django lit déjà dans la colonne `*_id` de la fiche. Les
+#: joindre coûterait trois jointures pour aucune donnée supplémentaire.
+DETAIL_SELECT_RELATED = (
+    "divinity_profile",
+    "hero_profile",
+    "creature_profile",
+    "primary_country",
+    "primary_ethnicity",
+    "primary_cultural_area",
+    "variant_of",
+)
+
+#: Collections préchargées du détail, hors relations sortantes : celles-ci
+#: dépendent de la politique et sont ajoutées par un `Prefetch` dédié.
+DETAIL_PREFETCH_RELATED = (
+    "secondary_countries",
+    "secondary_ethnicities",
+    "secondary_cultural_areas",
+    "domains",
+    "sources",
+)
+
+
 def public_entity_detail() -> QuerySet[Entity]:
     """Queryset du détail public : visibilité, jointures et préchargements.
 
     Les relations sortantes sont préchargées **déjà filtrées** par
     `public_relations()`, de sorte que la réponse ne puisse pas être
     construite depuis une collection non filtrée.
-
-    `variant_of` est joint sans condition : la jointure ne décide pas de la
-    visibilité, c'est le serializer qui masque une référence non publique. Le
-    joindre ici permet à cette garde de s'exécuter sans requête
-    supplémentaire.
     """
     return (
         public_entities()
-        .select_related(
-            "divinity_profile",
-            "hero_profile",
-            "creature_profile",
-            "primary_country",
-            "primary_ethnicity",
-            "primary_cultural_area",
-            "variant_of",
-        )
+        .select_related(*DETAIL_SELECT_RELATED)
         .prefetch_related(
-            "secondary_countries",
-            "secondary_ethnicities",
-            "secondary_cultural_areas",
-            "domains",
+            *DETAIL_PREFETCH_RELATED,
             Prefetch("relations_from", queryset=public_relations()),
-            "sources",
         )
     )
 
@@ -193,3 +189,119 @@ def is_publicly_visible(entity: Entity | None) -> bool:
     if entity is None:
         return False
     return entity.status == EntityStatus.PUBLISHED and entity.deleted_at is None
+
+
+# --- Politique privée : rôle et propriété -------------------------------
+#
+# Traduction littérale de la matrice de l'ADR 0002, précisée par l'ADR 0004.
+# Aucune nouvelle décision métier n'est prise ici.
+
+#: Statuts qu'un contributeur lit sur ses **propres** fiches, en plus de
+#: toutes les fiches publiées. Les trois valeurs sont énumérées plutôt que
+#: déduites de « tout sauf publié » : un statut ajouté plus tard ne devrait pas
+#: devenir lisible par simple effet de bord.
+OWNED_PRIVATE_STATUSES = (
+    EntityStatus.DRAFT,
+    EntityStatus.SUBMITTED,
+    EntityStatus.REJECTED,
+)
+
+
+def reads_every_record(roles: frozenset[str]) -> bool:
+    """Return whether the roles allow reading every non-deleted record."""
+    return bool(roles & {REVIEWER, ADMINISTRATOR})
+
+
+def private_filter(
+    *, roles: frozenset[str], caller_id: int | None, prefix: str = ""
+) -> Q:
+    """Select records readable by role and ownership, excluding deleted ones.
+
+    Reviewers and administrators read all; contributors read published records
+    and their own drafts, submissions and rejected records. Callers without
+    a role read nothing. A missing caller ID never matches ownerless records.
+    Use `prefix="to_entity__"` to apply this policy to a joined relation target.
+    """
+
+    def field(name: str) -> str:
+        return f"{prefix}{name}"
+
+    not_deleted = Q(**{field("deleted_at__isnull"): True})
+
+    if reads_every_record(roles):
+        return not_deleted
+    if CONTRIBUTOR not in roles:
+        return Q(**{field("pk__in"): []})
+
+    published = Q(**{field("status"): EntityStatus.PUBLISHED})
+    if caller_id is None:
+        return not_deleted & published
+
+    owned = Q(
+        **{
+            field("created_by_id"): caller_id,
+            field("status__in"): OWNED_PRIVATE_STATUSES,
+        }
+    )
+    return not_deleted & (published | owned)
+
+
+def private_entities(
+    *, roles: frozenset[str], caller_id: int | None
+) -> QuerySet[Entity]:
+    """Select privately readable records in stable name/id order."""
+    return Entity.objects.filter(
+        private_filter(roles=roles, caller_id=caller_id)
+    ).order_by("name", "id")
+
+
+def private_relations(
+    *, roles: frozenset[str], caller_id: int | None
+) -> QuerySet[EntityRelation]:
+    """Keep unresolved links and links to targets readable by the caller.
+
+    Omit forbidden resolved links entirely, without copying their target name.
+    """
+    return EntityRelation.objects.select_related("to_entity").filter(
+        Q(to_entity__isnull=True)
+        | private_filter(roles=roles, caller_id=caller_id, prefix="to_entity__")
+    )
+
+
+def private_entity_detail(
+    *, roles: frozenset[str], caller_id: int | None
+) -> QuerySet[Entity]:
+    """Preload private detail fields and already-filtered outgoing relations."""
+    return (
+        private_entities(roles=roles, caller_id=caller_id)
+        .select_related(*DETAIL_SELECT_RELATED)
+        .prefetch_related(
+            *DETAIL_PREFETCH_RELATED,
+            Prefetch(
+                "relations_from",
+                queryset=private_relations(roles=roles, caller_id=caller_id),
+            ),
+        )
+    )
+
+
+def is_privately_readable(
+    entity: Entity | None, *, roles: frozenset[str], caller_id: int | None
+) -> bool:
+    """Evaluate the private policy on a loaded target without querying.
+
+    Used by serializer reference guards; missing roles never grant access.
+    """
+    if entity is None or entity.deleted_at is not None:
+        return False
+    if reads_every_record(roles):
+        return True
+    if CONTRIBUTOR not in roles:
+        return False
+    if entity.status == EntityStatus.PUBLISHED:
+        return True
+    return (
+        caller_id is not None
+        and entity.created_by_id == caller_id
+        and entity.status in OWNED_PRIVATE_STATUSES
+    )

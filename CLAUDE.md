@@ -37,9 +37,12 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
   lorsqu'une règle ne peut pas être portée par un modèle seul : ainsi
   `mythology/services.py`, prévu par la décision 6 de l'ADR 0002 pour
   garantir le couple entité/profil, et `mythology/selectors.py`, demandé par
-  la phase 3 pour définir la visibilité publique en un seul endroit. La règle
-  exclut les abstractions spéculatives, pas les fonctions explicitement
-  commandées par la roadmap.
+  la phase 3 pour définir la visibilité publique en un seul endroit — et
+  étendu en phase 4 à la politique privée, selon le rôle et la propriété. La
+  règle exclut les abstractions spéculatives, pas les fonctions explicitement
+  commandées par la roadmap. De même, `EntityNavigationViewSet` existe parce
+  que deux vues concrètes partagent réellement la pagination, la recherche et
+  la validation des filtres : ce n'est pas une base posée « au cas où ».
 - **Configuration.** Toute valeur dépendante de l'environnement passe par une
   variable d'environnement déclarée dans `.env.example`. Jamais de secret en
   dur ni dans le dépôt.
@@ -84,9 +87,24 @@ Docker, CI.
 `/api/auth/` (obtention, renouvellement, identité), par Simple JWT. Restent
 hors périmètre la rotation des jetons, la liste de révocation, la
 déconnexion, l'inscription en libre-service et la réinitialisation de mot de
-passe. Surtout : être authentifié n'ouvre **aucun** accès supplémentaire au
-corpus — l'autorisation viendra avec l'écriture, portée par des groupes
-Django vérifiés côté serveur.
+passe.
+
+**Rôles et lecture privée.** Depuis l'incrément 2 de la phase 4, trois groupes
+Django — `contributor`, `reviewer`, `administrator`, créés par
+`accounts/migrations/0002_business_role_groups.py` — ouvrent deux routes de
+lecture éditoriale, `GET /api/manage/entities/` et son détail par slug. Un
+jeton seul ne suffit donc plus à dire qu'« être authentifié n'ouvre aucun
+accès » : il ouvre ces deux routes **si** le compte appartient à un groupe
+métier. `is_staff` seul n'accorde rien ; un superutilisateur actif est traité
+comme administrateur ; les rôles sont relus en base à chaque requête, jamais
+portés par les claims du jeton. Conventions complètes dans l'ADR 0004 du dépôt
+de pilotage.
+
+Les routes publiques restent strictement publiques : leur sélection et leurs
+champs sont identiques pour tous les appelants, relecteur et superutilisateur
+compris. Les écritures métier restent refusées partout (405) ; transitions de
+statut, attribution automatique du propriétaire, suppression et restauration
+appartiennent aux incréments suivants.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données

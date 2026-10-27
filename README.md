@@ -80,12 +80,13 @@ drafts, the collection answers `200` with zero results and any detail slug
 answers `404` — see the visibility rule below. No write method is offered on
 entities, because none exists.
 
-**Authenticating in Swagger UI.** Only `GET /api/auth/me/` requires a token.
+**Authenticating in Swagger UI.** `GET /api/auth/me/` and the two
+`/api/manage/entities/` operations require a token; everything else is open.
 Run `POST /api/auth/token/` first, copy the `access` value from the response,
-press **Authorize**, paste it, then execute `me`. Paste the token alone:
-Swagger adds the `Bearer ` prefix itself. The other operations stay available
-whether or not you are authorised — authenticating changes nothing about what
-they return.
+press **Authorize**, paste it, then execute the protected operation. Paste the
+token alone: Swagger adds the `Bearer ` prefix itself. The public operations
+stay available whether or not you are authorised — authenticating changes
+nothing about what they return.
 
 **CDN dependency.** Swagger UI and ReDoc load their JavaScript and CSS from a
 public CDN. Without internet access the HTML page is still served but will
@@ -93,6 +94,19 @@ not render. No offline bundle is shipped, as no such need has been
 established.
 ReDoc is pinned to version 2.5.3, compatible with the classic-script template
 provided by drf-spectacular; it does not follow the CDN's `latest` alias.
+
+## Two read contracts
+
+The corpus is served by two distinct pairs of routes, and they never mix.
+
+| Routes | Who | Shows |
+|---|---|---|
+| `/api/entities/…` | anyone, no token | published, non-deleted records only |
+| `/api/manage/entities/…` | access token **and** an editorial role | the editorial view of the corpus, by role and ownership |
+
+The public routes behave identically for every caller. A reviewer's or a
+superuser's token changes neither their selection nor their payload: the
+public contract is strictly public.
 
 ## Public read API
 
@@ -102,6 +116,9 @@ Two read-only endpoints, open to anonymous clients:
 |---|---|
 | `GET /api/entities/` | paginated collection of compact items: `id`, `slug`, `name`, `entity_type`, `category` |
 | `GET /api/entities/{slug}/` | full entity: common fields, reference data, type profile, relations and documentary sources |
+
+Neither payload carries an editorial field — no `status`, no `created_by`, no
+review or deletion mark.
 
 ### Pagination
 
@@ -224,6 +241,94 @@ Write operations and the moderation workflow are not implemented. Every HTTP
 write method on `/api/entities/` is refused with `405`, whether or not a token
 is supplied.
 
+## Private editorial read API
+
+Two read-only endpoints for editorial work. They require an access token
+**and** membership of one of three editorial groups.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/manage/entities/` | paginated collection: the five public compact fields, plus `status` and `created_by` |
+| `GET /api/manage/entities/{slug}/` | full entity: every public business field, plus `status`, `created_by`, `submitted_at`, `reviewed_at`, `reviewed_by` and `review_notes` |
+
+```bash
+curl http://127.0.0.1:8000/api/manage/entities/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+### Roles and what they read
+
+Roles are three Django groups — `contributor`, `reviewer` and
+`administrator` — created by a data migration. There is no `role` field on the
+account.
+
+| Caller | Reads on these routes |
+|---|---|
+| anonymous, or an unusable token | `401` |
+| authenticated, no editorial role | `403`, even for a published record |
+| contributor | every published record, plus its own `draft`, `submitted` and `rejected` |
+| reviewer, administrator, superuser | every record that has not been deleted |
+
+- **Signing in grants nothing.** An account with no editorial group is
+  refused. Reading published content is what the public routes are for.
+- **`is_staff` is not a role.** Reaching the Django admin is not a right over
+  the corpus.
+- **An active superuser is treated as an administrator**, even without the
+  group — a fallback administration access.
+- **Groups accumulate**, and groups unrelated to those three names are
+  ignored.
+- **Logically deleted records are excluded for everyone**, administrators
+  included. Restoration is a separate, later operation.
+- **An unowned record belongs to no contributor.** An imported record whose
+  `created_by` is `null` is invisible to contributors while it is unpublished;
+  reviewers and administrators still read it.
+
+Roles are read from group membership on **every request**, never from a claim
+inside the token. Adding or removing a group therefore takes effect on the
+next request, with the same token — no reissue, no refresh.
+
+### Account data is not exposed
+
+`created_by` and `reviewed_by` are account **identifiers**. No account object
+is serialised: no username, email address, password hash, group list or
+administrative flag appears in these payloads.
+
+### Nested references follow the caller's own rule
+
+- `variant_of` is `null` when the reference figure is not readable by the
+  calling account, leaking neither id, slug, name nor type.
+- A relation whose resolved target is not readable is **omitted entirely**,
+  and the hidden target's name is never copied into `to_name`.
+- Genuinely unresolved relations (`to_entity: null`, `to_name` filled) stay
+  readable, as on the public endpoint.
+- Deleted records stay hidden in these references too, and targets are
+  rendered as the four-field compact reference only.
+
+A reviewer and a contributor can therefore receive different nested
+references for the same record. That is intended, not a bug.
+
+### Navigation and errors
+
+The navigation is the public one, reused as is: fixed page size of 20, the
+same `page`, `search`, `entity_type`, `country` and `cultural_area`
+parameters, the same validation and the same ordering. `count` only ever
+counts records the account may read, and **no parameter can widen that
+selection**.
+
+| Situation | Response |
+|---|---|
+| No token, or an unusable one | `401` — these routes accept JWT only; an admin session is not enough |
+| Valid token, no editorial role | `403` |
+| Unknown slug, unreadable record, or deleted record | `404`, with the same body in all three cases |
+| Malformed `entity_type` or `country` | `400`, with the public messages |
+| Non-existent `page` | `404` |
+
+### Still read-only
+
+These routes add no write operation and no hidden administrative action.
+`POST`, `PUT`, `PATCH` and `DELETE` are refused with `405` for every role,
+superuser included.
+
 ## Authentication
 
 Three endpoints issue, refresh and verify JSON Web Tokens. They are the only
@@ -234,6 +339,9 @@ Three endpoints issue, refresh and verify JSON Web Tokens. They are the only
 | `POST` | `/api/auth/token/` | none | Exchange credentials for a token pair |
 | `POST` | `/api/auth/token/refresh/` | none | Exchange a refresh token for a new access token |
 | `GET` | `/api/auth/me/` | access token | Return the caller's own identity |
+
+The access token is also what opens the private editorial routes described
+above — together with an editorial group.
 
 ### Obtain a token pair
 
@@ -301,11 +409,13 @@ disabled, so the client keeps the refresh token it already has.
 
 ### Authentication is not authorisation
 
-Being authenticated grants **no** additional access at this stage. Reading
-entities is anonymous, and a valid token reveals nothing a stranger cannot
-already see: drafts and deleted records stay hidden, and writes stay refused.
-Role-based authorisation will arrive with write operations, carried by Django
-groups checked server-side.
+Holding a token proves who the caller is; it does not say what the caller may
+do. On the public routes a valid token changes nothing at all: they return
+exactly what a stranger sees. Access to the private editorial routes requires
+a Django group on top of the token, checked server-side on every request — and
+an account with a token but no group is refused with `403`.
+
+Write operations stay refused everywhere, for every role.
 
 ### Caveats
 
@@ -403,7 +513,15 @@ published, non-deleted entities and hides non-public nested references, the
 collection is paginated, searchable and filterable, and the contract is
 published as an OpenAPI schema with Swagger UI and ReDoc.
 
-Mythological content remains **read-only**: its write methods return `405`.
-JWT token issuance, refresh and the protected identity route were validated
-in phase 4 increment 1, including manual Postman exercises. Object-level permissions,
-content write operations and the moderation workflow are not implemented yet.
+Mythological content remains **read-only**: its write methods return `405` on
+both the public and the private routes, for every role.
+
+Phase 4 is under way. Increment 1 delivered JWT token issuance, refresh and
+the protected identity route, validated with manual Postman exercises.
+Increment 2 adds the three editorial groups, created by a data migration, and
+the private read endpoints described above: role and ownership select the
+records, and nested references follow the caller's own rule.
+
+Content write operations, the editorial transitions (submission, publication,
+rejection, reopening) and logical deletion or restoration are not implemented
+yet.

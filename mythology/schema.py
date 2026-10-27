@@ -1,4 +1,4 @@
-"""OpenAPI annotations for the public entity endpoints.
+"""OpenAPI annotations for the public and private entity endpoints.
 
 Kept in its own module so the long public descriptions and examples do not
 crowd out the view logic. It holds no behaviour: only the parameter
@@ -349,4 +349,166 @@ DETAIL_DESCRIPTION = (
     "The collection's query parameters do not apply here: availability "
     "depends solely on the public visibility of the requested slug.\n\n"
     "Write methods are refused with `405 Method Not Allowed`."
+)
+
+
+# --- Private editorial endpoints ----------------------------------------
+#
+# Les textes ci-dessous décrivent les deux routes sous `/api/manage/`. Ils
+# sont publics comme le reste du schéma : le contrat d'une route protégée est
+# documenté, seules ses données le sont pas.
+
+PRIVATE_UNAUTHENTICATED_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "No usable access token was provided. These endpoints accept JWT "
+        "only: an open administration session is deliberately not enough. "
+        "HTTP 401 is returned when the token is missing, malformed, "
+        "expired, signed with another key, a refresh token sent in place of "
+        "an access token, or issued for an account that has since been "
+        "deactivated or deleted. The error body depends on the cause."
+    ),
+    examples=[
+        OpenApiExample(
+            "MissingToken",
+            response_only=True,
+            value={"detail": "Authentication credentials were not provided."},
+        )
+    ],
+)
+
+PRIVATE_FORBIDDEN_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "The token is valid but its account holds no editorial role. "
+        "Membership of the `contributor`, `reviewer` or `administrator` group "
+        "is required, and is granted by an administrator. Being a member of "
+        "the Django staff grants nothing here.\n\n"
+        "This is returned for every request from such an account, including "
+        "one asking for a published record: reading published content is what "
+        "the public endpoints are for."
+    ),
+    examples=[
+        OpenApiExample(
+            "NoEditorialRole",
+            response_only=True,
+            value={
+                "detail": (
+                    "This account holds no editorial role. Private editorial "
+                    "access requires membership of the contributor, reviewer "
+                    "or administrator group, granted by an administrator."
+                )
+            },
+        )
+    ],
+)
+
+PRIVATE_NOT_FOUND_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "No entity readable by this account matches this slug. The same "
+        "response is returned whether the slug does not exist at all, refers "
+        "to a record this account may not read, or refers to a deleted "
+        "record: the body never reveals which, nor the record's editorial "
+        "status."
+    ),
+    examples=[
+        OpenApiExample(
+            "UnknownOrUnreadableSlug",
+            response_only=True,
+            value={"detail": "No Entity matches the given query."},
+        )
+    ],
+)
+
+PRIVATE_LIST_DESCRIPTION = (
+    "Returns the paginated collection of entities this account may read for "
+    "editorial work. Requires an access token in the `Authorization` header "
+    "and an editorial role.\n\n"
+    "**What each role reads.** A contributor reads every published record, "
+    "plus its own records in `draft`, `submitted` or `rejected`. A reviewer, "
+    "an administrator and a superuser read every record that has not been "
+    "deleted. Logically deleted records are excluded for everyone; "
+    "restoration is a separate, later operation.\n\n"
+    "An imported record with no owner (`created_by` is `null`) belongs to no "
+    "contributor, and is therefore invisible to contributors while it is "
+    "unpublished. Reviewers and administrators still read it.\n\n"
+    "**Roles come from the database.** They are read from Django group "
+    "membership on every request, not from a claim inside the token. Adding "
+    "or removing a group therefore takes effect on the next request, with the "
+    "same token.\n\n"
+    "**Added fields.** Each item carries the five public compact fields, plus "
+    "`status` and `created_by`. The public collection gains neither.\n\n"
+    "**Navigation.** Identical to the public collection: fixed page size of "
+    "20, the same `page`, `search`, `entity_type`, `country` and "
+    "`cultural_area` parameters, with the same validation and the same "
+    "ordering. `count` only ever counts records this account may read, and no "
+    "parameter can widen that selection.\n\n"
+    "Write methods are refused with `405 Method Not Allowed`, for every role."
+)
+
+PRIVATE_DETAIL_DESCRIPTION = (
+    "Returns one entity readable by this account, addressed by its `slug`. "
+    "Requires an access token and an editorial role.\n\n"
+    "The selection rule is the one described on the private collection. A "
+    "record this account may not read and an unknown slug return the same "
+    "`404`: the response never reveals that a record exists, nor its "
+    "editorial status.\n\n"
+    "**Added fields.** Every business field of the public detail, plus "
+    "`status`, `created_by`, `submitted_at`, `reviewed_at`, `reviewed_by` and "
+    "`review_notes`. The owner and reviewer appear as identifiers only — no "
+    "account is serialised here.\n\n"
+    "**Nested references follow the caller's own rule.** `variant_of` is "
+    "`null` when the reference figure is not readable by this account, "
+    "revealing neither its id, slug, name nor type. A relation whose resolved "
+    "target is not readable is omitted entirely, and the hidden target's name "
+    "is never copied into `to_name`. Deleted records stay hidden in these "
+    "references too. Genuinely unresolved relations stay readable. Targets "
+    "are rendered as a four-field reference only — the detail is never nested "
+    "recursively.\n\n"
+    "A reviewer and a contributor can therefore receive different nested "
+    "references for the same record, which is the intended behaviour.\n\n"
+    "The collection's query parameters do not apply here, and cannot change "
+    "which records this account may read.\n\n"
+    "Write methods are refused with `405 Method Not Allowed`, for every role."
+)
+
+PRIVATE_LIST_EXAMPLE = OpenApiExample(
+    "Collection item (synthetic)",
+    description=(
+        "One synthetic figure. Invented data, shown to illustrate the shape "
+        "of each item inside `results`. The surrounding `count`, `next` and "
+        "`previous` values are generic placeholders supplied by the "
+        "pagination schema, not part of this example."
+    ),
+    response_only=True,
+    value={
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "slug": "example-hero",
+        "name": "Example Hero",
+        "entity_type": "hero",
+        "category": "Synthetic subtitle",
+        "status": "draft",
+        "created_by": 1,
+    },
+)
+
+PRIVATE_DETAIL_EXAMPLE = OpenApiExample(
+    "Submitted entity awaiting review (synthetic)",
+    description=(
+        "Invented figure, shown to illustrate the response shape. Note the "
+        "editorial fields added by this endpoint, the owner and reviewer "
+        "given as identifiers, and `reviewed_by` left `null` because the "
+        "record has not been reviewed yet."
+    ),
+    response_only=True,
+    value={
+        **DETAIL_EXAMPLE.value,
+        "status": "submitted",
+        "created_by": 1,
+        "submitted_at": "2026-10-22T08:30:00Z",
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "review_notes": "",
+    },
 )

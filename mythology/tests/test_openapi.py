@@ -80,6 +80,8 @@ def test_schema_generation_does_not_need_published_data(
         "/api/health/",
         "/api/entities/",
         "/api/entities/{slug}/",
+        "/api/manage/entities/",
+        "/api/manage/entities/{slug}/",
         "/api/auth/token/",
         "/api/auth/token/refresh/",
         "/api/auth/me/",
@@ -132,19 +134,164 @@ def test_documentation_routes_are_not_in_the_schema(schema: dict[str, Any]) -> N
         assert path not in schema["paths"]
 
 
-def test_no_authentication_is_advertised_except_on_me(schema: dict[str, Any]) -> None:
-    """Only the identity endpoint may advertise a security requirement.
+#: Les seules opérations autorisées à annoncer une exigence de sécurité :
+#: la vérification d'identité et les deux routes éditoriales privées. Tout le
+#: reste est public et doit le rester dans le schéma.
+PROTECTED_PATHS = {
+    "/api/auth/me/",
+    "/api/manage/entities/",
+    "/api/manage/entities/{slug}/",
+}
+
+
+def test_authentication_is_advertised_only_on_the_protected_paths(
+    schema: dict[str, Any],
+) -> None:
+    """Only the identity endpoint and the private routes require a token.
 
     A global `security` entry would make Swagger present every read as
-    protected, which would be false: reading is anonymous, and obtaining a
-    token cannot itself require a token.
+    protected, which would be false: public reading is anonymous, and
+    obtaining a token cannot itself require a token.
     """
     assert "security" not in schema
     for path, operations in schema["paths"].items():
         for method, operation in operations.items():
-            if path == "/api/auth/me/":
-                continue
-            assert "security" not in operation, f"{method.upper()} {path}"
+            advertised = "security" in operation
+            assert advertised is (path in PROTECTED_PATHS), f"{method.upper()} {path}"
+
+
+@pytest.mark.parametrize("path", sorted(PROTECTED_PATHS - {"/api/auth/me/"}))
+def test_private_routes_require_a_bearer_token(
+    schema: dict[str, Any], path: str
+) -> None:
+    """Swagger must offer Bearer authentication on the private routes."""
+    assert schema["paths"][path]["get"]["security"] == [{"jwtAuth": []}]
+
+
+@pytest.mark.parametrize("path", sorted(PROTECTED_PATHS - {"/api/auth/me/"}))
+def test_private_routes_declare_their_refusals(
+    schema: dict[str, Any], path: str
+) -> None:
+    """A reader must know that `401` and `403` mean different things."""
+    responses = schema["paths"][path]["get"]["responses"]
+
+    assert {"401", "403"} <= set(responses)
+    assert "JWT" in responses["401"]["description"]
+    assert "contributor" in responses["403"]["description"]
+
+
+def test_private_detail_404_does_not_disclose_existence(
+    schema: dict[str, Any],
+) -> None:
+    """The private 404 is documented as deliberately indistinguishable."""
+    documented = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["responses"][
+        "404"
+    ]
+
+    assert "never reveals which" in documented["description"]
+
+
+def test_private_list_reuses_the_five_parameters(schema: dict[str, Any]) -> None:
+    """The private collection documents the same navigation, not another one."""
+    private = schema["paths"]["/api/manage/entities/"]["get"]["parameters"]
+    public = schema["paths"]["/api/entities/"]["get"]["parameters"]
+
+    assert private == public
+
+
+def test_private_detail_declares_only_the_slug_parameter(
+    schema: dict[str, Any],
+) -> None:
+    parameters = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["parameters"]
+
+    assert [parameter["name"] for parameter in parameters] == ["slug"]
+
+
+def test_private_components_add_exactly_the_editorial_fields(
+    schema: dict[str, Any],
+) -> None:
+    """The private payloads extend the public ones; they do not replace them."""
+    components = schema["components"]["schemas"]
+
+    assert set(components["PrivateEntityList"]["properties"]) == set(
+        components["EntityList"]["properties"]
+    ) | {"status", "created_by"}
+    assert set(components["PrivateEntityDetail"]["properties"]) == set(
+        components["EntityDetail"]["properties"]
+    ) | {
+        "status",
+        "created_by",
+        "submitted_at",
+        "reviewed_at",
+        "reviewed_by",
+        "review_notes",
+    }
+
+
+def test_private_components_never_expose_the_deletion_marks(
+    schema: dict[str, Any],
+) -> None:
+    """Deletion stays outside the contract, private payloads included."""
+    for component in ("PrivateEntityList", "PrivateEntityDetail"):
+        properties = schema["components"]["schemas"][component]["properties"]
+        assert "deleted_at" not in properties, component
+        assert "deleted_by" not in properties, component
+
+
+@pytest.mark.parametrize(
+    ("component", "field"),
+    [
+        ("PrivateEntityList", "created_by"),
+        ("PrivateEntityDetail", "created_by"),
+        ("PrivateEntityDetail", "reviewed_by"),
+    ],
+)
+def test_private_actors_are_declared_as_nullable_identifiers(
+    schema: dict[str, Any], component: str, field: str
+) -> None:
+    """The three actors are account identifiers, never nested accounts."""
+    declared = schema["components"]["schemas"][component]["properties"][field]
+
+    assert declared.get("nullable") is True
+    assert "$ref" not in declared
+
+
+def test_private_detail_example_matches_its_component(
+    schema: dict[str, Any],
+) -> None:
+    """The hand-written private example cannot drift from the serializer."""
+    detail = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["responses"]["200"]
+    examples = detail["content"]["application/json"]["examples"]
+    example = next(iter(examples.values()))["value"]
+    declared = schema["components"]["schemas"]["PrivateEntityDetail"]["properties"]
+
+    assert set(example) == set(declared)
+
+
+def test_private_list_example_matches_its_component(schema: dict[str, Any]) -> None:
+    liste = schema["paths"]["/api/manage/entities/"]["get"]["responses"]["200"]
+    examples = liste["content"]["application/json"]["examples"]
+    envelope = next(iter(examples.values()))["value"]
+    declared = schema["components"]["schemas"]["PrivateEntityList"]["properties"]
+
+    assert set(envelope["results"][0]) == set(declared)
+
+
+def test_the_public_detail_example_stays_on_the_public_route(
+    schema: dict[str, Any],
+) -> None:
+    """Each route documents its own payload, with no example bleeding across.
+
+    drf-spectacular accumulates annotations along an inheritance chain, so a
+    private view inheriting the public one would publish the public example
+    next to a private component. The two views therefore share only their
+    navigation, through a base class carrying no annotation.
+    """
+    public = schema["paths"]["/api/entities/{slug}/"]["get"]["responses"]["200"]
+    private = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["responses"]["200"]
+
+    assert len(public["content"]["application/json"]["examples"]) == 1
+    assert len(private["content"]["application/json"]["examples"]) == 1
 
 
 def test_token_responses_describe_their_payload(schema: dict[str, Any]) -> None:
@@ -560,6 +707,21 @@ def test_global_description_states_the_token_caveats(schema: dict[str, Any]) -> 
     assert "not authorisation" in description
     assert "cannot be revoked" in description
     assert "no logout endpoint" in description
-    # Les lectures restent anonymes : il faut le dire, sinon un client
-    # suppose qu'un jeton est nécessaire pour consulter le corpus.
+    # Les lectures publiques restent anonymes : il faut le dire, sinon un
+    # client suppose qu'un jeton est nécessaire pour consulter le corpus.
     assert "not** required to read entities" in description
+
+
+def test_global_description_separates_the_two_read_contracts(
+    schema: dict[str, Any],
+) -> None:
+    """A reader must not mistake the private route for the public one."""
+    description = schema["info"]["description"]
+
+    assert "/api/manage/entities/" in description
+    assert "contributor" in description
+    assert "reviewer" in description
+    assert "administrator" in description
+    # Les rôles viennent de la base, pas du jeton : c'est ce qui explique
+    # qu'un changement de groupe agisse sans réémission.
+    assert "never from a claim inside the token" in description

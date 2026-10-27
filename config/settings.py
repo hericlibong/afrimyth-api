@@ -187,27 +187,53 @@ SIMPLE_JWT = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Afrimyth API",
     "DESCRIPTION": (
-        "Public read-only API for African mythological figures: divinities, "
-        "heroes and creatures, with their cultural and geographic reference "
-        "data, their relations to one another and their documentary sources."
+        "Read-only API for African mythological figures: divinities, heroes "
+        "and creatures, with their cultural and geographic reference data, "
+        "their relations to one another and their documentary sources."
         "\n\n"
-        "## Visibility\n\n"
+        "## Two distinct read contracts\n\n"
+        "`/api/entities/` is **public**: it serves published content to "
+        "anyone. `/api/manage/entities/` is **private**: it serves the "
+        "editorial view of the corpus to accounts holding an editorial role. "
+        "They are separate routes with separate payloads; the public one "
+        "never changes its shape or its selection according to who calls "
+        "it.\n\n"
+        "## Public visibility\n\n"
         "An entity is publicly visible **if and only if** its editorial "
         "status is `published` and it has not been logically deleted. This "
-        "rule applies to both endpoints and to every caller — anonymous, "
-        "authenticated or superuser alike. A non-public entity and an unknown "
+        "rule applies to both public endpoints and to every caller — "
+        "anonymous, authenticated, reviewer or superuser alike. A non-public "
+        "entity and an unknown "
         "slug return the same `404`, with the same body: the response never "
         "reveals that a record exists, nor its editorial status.\n\n"
         "Nested references follow the same rule. `variant_of` is `null` when "
         "the referenced figure is not public, and a relation whose resolved "
         "target is not public is omitted entirely — its name is never copied "
         "into `to_name`.\n\n"
+        "The public payloads carry no editorial field: neither `status`, nor "
+        "`created_by`, nor any review or deletion mark.\n\n"
+        "## Private editorial read\n\n"
+        "`/api/manage/entities/` requires an access token **and** membership "
+        "of one of three Django groups: `contributor`, `reviewer` or "
+        "`administrator`. An authenticated account holding none of them is "
+        "refused with `403`, even for a published record — reading published "
+        "content is what the public endpoints are for.\n\n"
+        "A contributor reads every published record, plus its own records in "
+        "`draft`, `submitted` or `rejected`. A reviewer, an administrator and "
+        "a superuser read every record that has not been deleted. Deleted "
+        "records are excluded for everyone. These payloads add `status` and "
+        "`created_by`, and the detail adds the review marks; nested "
+        "references follow the caller's own rule rather than the public "
+        "one.\n\n"
+        "Roles are read from group membership on every request, never from a "
+        "claim inside the token: a group change takes effect on the next "
+        "request, with the same token.\n\n"
         "## Read-only content\n\n"
-        "Mythological content is read-only. On `/api/entities/`, only `GET` is "
-        "available; `POST`, `PUT`, `PATCH` and `DELETE` are refused with "
-        "`405 Method Not Allowed`. Write operations and the moderation "
-        "workflow are planned for a later phase and are **not** part of this "
-        "contract.\n\n"
+        "Mythological content is read-only. On `/api/entities/` and on "
+        "`/api/manage/entities/`, only `GET` is available; `POST`, `PUT`, "
+        "`PATCH` and `DELETE` are refused with `405 Method Not Allowed`, for "
+        "every role. Write operations and the moderation workflow are planned "
+        "for a later phase and are **not** part of this contract.\n\n"
         "The `/api/auth/` endpoints are the exception: issuing and refreshing "
         "a token are `POST` operations, because they carry credentials in the "
         "request body. They create no content.\n\n"
@@ -216,20 +242,25 @@ SPECTACULAR_SETTINGS = {
         "access token and a refresh token. The access token is then sent as "
         "`Authorization: Bearer <access token>`, and "
         "`POST /api/auth/token/refresh/` issues a new one when it expires.\n\n"
-        "Authentication is **not** required to read entities, and it currently "
-        "grants no additional access: it is not authorisation. "
-        "`GET /api/auth/me/` is the only endpoint that requires a token, and "
-        "it exists to let a client verify that its token works.\n\n"
+        "Authentication is **not** required to read entities on the public "
+        "endpoints, and it changes nothing about what they return. Holding a "
+        "token is still not authorisation by itself: what an account may read "
+        "privately depends on its groups, checked server-side on every "
+        "request.\n\n"
+        "`GET /api/auth/me/` returns the caller's own identity and exists to "
+        "let a client verify that its token works. It says nothing about what "
+        "the account may do.\n\n"
         "Tokens cannot be revoked at this stage. Refreshing does not "
         "invalidate the previous access token, and discarding a token on the "
         "client does not cancel it on the server: it stays valid until it "
         "expires. There is no logout endpoint.\n\n"
         "## Expect an empty collection\n\n"
         "Entities are created as drafts. Until a record is explicitly "
-        "published, the collection legitimately returns zero results and "
-        "every detail URL returns `404`. On the current development database "
-        "the imported pilot figures are still drafts, so they are absent "
-        "from this API.\n\n"
+        "published, the public collection legitimately returns zero results "
+        "and every public detail URL returns `404`. On the current "
+        "development database the imported pilot figures are still drafts, so "
+        "they are absent from the public API and reachable only through the "
+        "private endpoints, by an account holding an editorial role.\n\n"
         "## Editorial caveat\n\n"
         "Imported content reproduces a historical corpus. Its accuracy, "
         "completeness and classification are under editorial review and are "
@@ -248,6 +279,7 @@ SPECTACULAR_SETTINGS = {
     "SORT_OPERATIONS": False,
     "ENUM_NAME_OVERRIDES": {
         "EntityTypeEnum": "mythology.models.EntityType.choices",
+        "EntityStatusEnum": "mythology.models.EntityStatus.choices",
         "GenderEnum": "mythology.models.Gender.choices",
         "ThreatLevelEnum": "mythology.models.ThreatLevel.choices",
         "RelationKindEnum": "mythology.models.RelationKind.choices",
@@ -256,6 +288,14 @@ SPECTACULAR_SETTINGS = {
     },
     "TAGS": [
         {"name": "entities", "description": "Public read access to figures."},
+        {
+            "name": "management",
+            "description": (
+                "Private read access for editorial work, by role. Requires an "
+                "access token and membership of one of the three editorial "
+                "groups."
+            ),
+        },
         {
             "name": "authentication",
             "description": "Token issuance, refresh and identity check.",

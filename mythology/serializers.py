@@ -1,8 +1,15 @@
 """Read serializers for the mythology domain.
 
-Two distinct representations of `Entity`: a compact one for the collection
-and a detailed one that nests the type profile. Write serializers will arrive
-with the CRUD endpoints of a later phase.
+Four read representations of `Entity`: a compact one and a detailed one for
+the **public** collection and detail, and their **private** counterparts,
+which add the editorial fields and apply the caller's own visibility rule to
+nested references. Write serializers will arrive with the CRUD endpoints of a
+later phase.
+
+The private representations are subclasses, not copies: they inherit every
+business field and only declare what differs. Nothing switches a public
+serializer into private mode — a request parameter least of all. The two are
+distinct classes, chosen by the view that owns the route.
 
 **These docstrings are public.** drf-spectacular turns each class docstring
 into the `description` of the matching OpenAPI component, rendered in Swagger
@@ -16,6 +23,7 @@ from typing import Any
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from accounts.models import User
 from mythology.models import (
     Country,
     CreatureProfile,
@@ -28,7 +36,7 @@ from mythology.models import (
     HeroProfile,
     Source,
 )
-from mythology.selectors import is_publicly_visible
+from mythology.selectors import is_privately_readable, is_publicly_visible
 
 
 class SourceSerializer(serializers.ModelSerializer[Source]):
@@ -311,3 +319,144 @@ class EntityDetailSerializer(serializers.ModelSerializer[Entity]):
             "hero_profile",
             "creature_profile",
         ]
+
+
+# --- Private editorial representations ----------------------------------
+#
+# Deux serializers privés, obtenus par héritage : ils ajoutent les champs
+# éditoriaux et remplacent la garde des références imbriquées. Les classes
+# publiques restent inchangées, donc leurs réponses aussi.
+#
+# Le propriétaire et le relecteur sont rendus par `account_identifier_field()` :
+# un identifiant nullable, en lecture seule.
+
+
+def account_identifier_field(
+    help_text: str,
+) -> serializers.PrimaryKeyRelatedField[User]:
+    """Build a read-only, nullable account identifier field.
+
+    The identifier is read from the record's own `*_id` column, so no account
+    is queried — and no account data can be serialised through this field.
+    """
+    return serializers.PrimaryKeyRelatedField(
+        read_only=True, allow_null=True, help_text=help_text
+    )
+
+
+class PrivateEntityListSerializer(EntityListSerializer):
+    """Compact representation of an entity on the private collection.
+
+    The five public fields, plus the editorial state and the owner. Profiles,
+    reference data, relations and documentary sources are only available on
+    the private detail endpoint, exactly as on the public one.
+    """
+
+    created_by = account_identifier_field(
+        "Identifier of the account that owns this record, or `null` for an "
+        "imported record that has no owner. No other account data is exposed."
+    )
+
+    class Meta(EntityListSerializer.Meta):
+        fields = [*EntityListSerializer.Meta.fields, "status", "created_by"]
+
+
+class PrivateEntityDetailSerializer(EntityDetailSerializer):
+    """Full representation of one entity on the private detail endpoint.
+
+    Carries every business field of the public detail, plus the editorial
+    state, the owner and the review marks. Account records themselves are
+    never serialised: the owner and reviewer appear as identifiers only.
+
+    Nested references honour the **caller's own** visibility rule, not the
+    public one: `variant_of` is `null` and a relation is omitted entirely when
+    its resolved target is not readable by this caller. A reviewer therefore
+    sees a draft reference that a contributor does not.
+    """
+
+    created_by = account_identifier_field(
+        "Identifier of the account that owns this record, or `null` for an "
+        "imported record that has no owner."
+    )
+    reviewed_by = account_identifier_field(
+        "Identifier of the account that last reviewed this record, or `null` "
+        "when it has never been reviewed."
+    )
+
+    # Les deux `SerializerMethodField` sont redéclarés pour leur `help_text` :
+    # celui de la classe publique décrit la règle publique, qui n'est pas
+    # celle appliquée ici.
+    variant_of = serializers.SerializerMethodField(
+        help_text=(
+            "The reference figure this entity is a cultural variant of, or "
+            "`null`. Also `null` when the reference exists but is not "
+            "readable by the calling account."
+        )
+    )
+    relations = serializers.SerializerMethodField(
+        help_text=(
+            "Outgoing relations. Links whose resolved target is not readable "
+            "by the calling account are omitted entirely, and the hidden "
+            "target's name is never copied into `to_name`. Incoming relations "
+            "are not exposed."
+        )
+    )
+
+    class Meta(EntityDetailSerializer.Meta):
+        fields = [
+            *EntityDetailSerializer.Meta.fields,
+            "status",
+            "created_by",
+            "submitted_at",
+            "reviewed_at",
+            "reviewed_by",
+            "review_notes",
+        ]
+
+    def caller_policy(self) -> tuple[frozenset[str], int | None]:
+        """Return the caller's roles and identifier, taken from the context.
+
+        Restrictive by default. A serializer used without a valid caller —
+        a test, a future internal call, a forgotten context — gets no role at
+        all, so every structured reference is hidden. It never falls back to
+        the public rule, which would be more permissive than this caller is
+        entitled to.
+        """
+        roles = self.context.get("caller_roles") or frozenset()
+        assert isinstance(roles, frozenset)
+        caller_id = self.context.get("caller_id")
+        return roles, caller_id
+
+    @extend_schema_field(EntityReferenceSerializer(allow_null=True))
+    def get_variant_of(self, entity: Entity) -> dict[str, Any] | None:
+        """Expose the reference figure only when this caller may read it."""
+        roles, caller_id = self.caller_policy()
+        if not is_privately_readable(
+            entity.variant_of, roles=roles, caller_id=caller_id
+        ):
+            return None
+        return EntityReferenceSerializer(entity.variant_of).data
+
+    @extend_schema_field(EntityRelationSerializer(many=True))
+    def get_relations(self, entity: Entity) -> list[dict[str, Any]]:
+        """Expose the outgoing relations whose target this caller may read.
+
+        The filtering is **repeated here**, as on the public serializer and
+        for the same reason: no use of this class can publish a link to a
+        target the caller is not entitled to see, whatever queryset it
+        receives. A discarded link disappears entirely; its `to_name` is not
+        filled with the hidden target's name.
+
+        Genuinely unresolved links — `to_entity` is `null` — stay readable, as
+        they already were on the public endpoint.
+        """
+        roles, caller_id = self.caller_policy()
+        visible = [
+            relation
+            for relation in entity.relations_from.all()
+            if relation.to_entity_id is None
+            or is_privately_readable(
+                relation.to_entity, roles=roles, caller_id=caller_id
+            )
+        ]
+        return list(EntityRelationSerializer(visible, many=True).data)
