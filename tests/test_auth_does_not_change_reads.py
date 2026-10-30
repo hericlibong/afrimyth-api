@@ -1,4 +1,8 @@
-"""JWT must preserve anonymous reads, public visibility and read-only content."""
+"""JWT must preserve anonymous reads, public visibility and read-only public routes.
+
+The write refusals below are those of `/api/entities/`, which has none. Private
+creation is a separate route with its own suite.
+"""
 
 import pytest
 from django.test import Client

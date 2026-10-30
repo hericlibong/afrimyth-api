@@ -78,9 +78,9 @@ Expand an operation, press **Try it out**, optionally fill the collection's
 query parameters, then **Execute**. On a database holding only unpublished
 drafts, the collection answers `200` with zero results and any detail slug
 answers `404` — see the visibility rule below. No write method is offered on
-entities, because none exists.
+the public entity routes, because none exists.
 
-**Authenticating in Swagger UI.** `GET /api/auth/me/` and the two
+**Authenticating in Swagger UI.** `GET /api/auth/me/` and the three
 `/api/manage/entities/` operations require a token; everything else is open.
 Run `POST /api/auth/token/` first, copy the `access` value from the response,
 press **Authorize**, paste it, then execute the protected operation. Paste the
@@ -103,6 +103,9 @@ The corpus is served by two distinct pairs of routes, and they never mix.
 |---|---|---|
 | `/api/entities/…` | anyone, no token | published, non-deleted records only |
 | `/api/manage/entities/…` | access token **and** an editorial role | the editorial view of the corpus, by role and ownership |
+
+The private collection is also where a record is created; the public routes
+carry no write operation at all.
 
 The public routes behave identically for every caller. A reviewer's or a
 superuser's token changes neither their selection nor their payload: the
@@ -237,19 +240,20 @@ behaviour, not a misconfiguration.
 
 ### Not available yet
 
-Write operations and the moderation workflow are not implemented. Every HTTP
-write method on `/api/entities/` is refused with `405`, whether or not a token
-is supplied.
+The public routes carry no write operation. Every HTTP write method on
+`/api/entities/` is refused with `405`, whether or not a token is supplied.
+Creating a record happens on the private collection described below.
 
-## Private editorial read API
+## Private editorial API
 
-Two read-only endpoints for editorial work. They require an access token
-**and** membership of one of three editorial groups.
+Three endpoints for editorial work. They require an access token **and**
+membership of one of three editorial groups.
 
 | Endpoint | Returns |
 |---|---|
 | `GET /api/manage/entities/` | paginated collection: the five public compact fields, plus `status` and `created_by` |
 | `GET /api/manage/entities/{slug}/` | full entity: every public business field, plus `status`, `created_by`, `submitted_at`, `reviewed_at`, `reviewed_by` and `review_notes` |
+| `POST /api/manage/entities/` | creates one entity and the profile of its type, as a draft owned by the caller; answers `201` with the private detail payload |
 
 ```bash
 curl http://127.0.0.1:8000/api/manage/entities/ \
@@ -262,12 +266,12 @@ Roles are three Django groups — `contributor`, `reviewer` and
 `administrator` — created by a data migration. There is no `role` field on the
 account.
 
-| Caller | Reads on these routes |
-|---|---|
-| anonymous, or an unusable token | `401` |
-| authenticated, no editorial role | `403`, even for a published record |
-| contributor | every published record, plus its own `draft`, `submitted` and `rejected` |
-| reviewer, administrator, superuser | every record that has not been deleted |
+| Caller | Reads on these routes | May create |
+|---|---|---|
+| anonymous, or an unusable token | `401` | no |
+| authenticated, no editorial role | `403`, even for a published record | no |
+| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes |
+| reviewer, administrator, superuser | every record that has not been deleted | yes |
 
 - **Signing in grants nothing.** An account with no editorial group is
   refused. Reading published content is what the public routes are for.
@@ -323,16 +327,79 @@ selection**.
 | Malformed `entity_type` or `country` | `400`, with the public messages |
 | Non-existent `page` | `404` |
 
-### Still read-only
+### Create an entity and its profile
 
-These routes add no write operation and no hidden administrative action.
-`POST`, `PUT`, `PATCH` and `DELETE` are refused with `405` for every role,
-superuser included.
+`POST /api/manage/entities/` creates one entity and the profile of its type, as
+a draft owned by the calling account. All four editorial callers may create.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Example Created Hero", "slug": "example-created-hero", "entity_type": "hero", "gender": "female", "hero_profile": {"titles": ["Synthetic title"]}}'
+```
+
+**The server decides four things.** `created_by` is the authenticated account,
+`status` is `draft`, the `id` is generated, and `created_at` and `updated_at`
+come from the database. None of them can be supplied — not even by an
+administrator — and neither can `submitted_at`, `reviewed_at`, `reviewed_by`,
+`review_notes`, `deleted_at` or `deleted_by`. Sending one of these keys returns
+`400` naming it; it is never silently dropped.
+
+**Required fields.** `name`, `slug`, `entity_type` and `gender`. The slug is
+taken as given: it is never generated from the name, nor suffixed to resolve a
+collision.
+
+**The profile follows the type.** Put it under the matching key —
+`divinity_profile`, `hero_profile` or `creature_profile`. The key may be
+omitted or sent as `{}`, in which case the profile is created with its default
+values: an entity never exists without the profile of its type. The two other
+keys are refused, as is a profile sent as `null`, and a profile may not name
+its own `entity` or `id`.
+
+**Reference data is attached by identifier**, under the field names the detail
+payload already uses: `primary_country`, `secondary_countries`,
+`primary_ethnicity`, `secondary_ethnicities`, `primary_cultural_area`,
+`secondary_cultural_areas` and `domains`. Primary anchors are optional and may
+be `null`; the collections are optional and default to empty. No reference
+record is ever created here, and the same value cannot be both a primary anchor
+and a secondary attachment of the same dimension — decisions 1, 2 and 3 of
+ADR 0002.
+
+**`variant_of`** takes the UUID of a figure the calling account may read
+privately. An unreadable record, a deleted record and an unknown identifier are
+refused with the same message, which never confirms that a record exists.
+
+**All or nothing.** The entity, its profile and its attachments are written in
+a single transaction. An invalid request returns `400` and creates nothing —
+never an entity without its profile, nor a record with half of its
+attachments.
+
+| Situation | Response |
+|---|---|
+| Created | `201` with the private detail payload of the new draft |
+| Missing or invalid field, duplicate name or slug, unknown reference | `400`, one key per field at fault |
+| Server-controlled field supplied | `400` naming that field |
+| `sources` or `relations` supplied | `400` — nested creation is deferred |
+| Unrecognised field name | `400` — a typo is reported, not ignored |
+| No token, or an unusable one | `401` |
+| Valid token, no editorial role | `403` |
+
+A new record is readable at once on the private endpoints by its owner, and
+absent from the public API until it is published.
+
+### The other writes are still refused
+
+`PUT`, `PATCH` and `DELETE` are refused with `405` on both private URLs, for
+every role, superuser included, and `POST` is refused on the private detail
+URL. Updating, the editorial transitions — submission, publication, rejection,
+reopening — and logical deletion or restoration belong to later increments, and
+so does attaching documentary sources and relations.
 
 ## Authentication
 
-Three endpoints issue, refresh and verify JSON Web Tokens. They are the only
-`POST` operations in the API, and they create no content.
+Three endpoints issue, refresh and verify JSON Web Tokens. They carry
+credentials in a request body, and create no content.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -415,7 +482,8 @@ exactly what a stranger sees. Access to the private editorial routes requires
 a Django group on top of the token, checked server-side on every request — and
 an account with a token but no group is refused with `403`.
 
-Write operations stay refused everywhere, for every role.
+The only write operation is the private creation described above. It never
+lets a client choose the owner or the editorial status, whatever its role.
 
 ### Caveats
 
@@ -513,15 +581,15 @@ published, non-deleted entities and hides non-public nested references, the
 collection is paginated, searchable and filterable, and the contract is
 published as an OpenAPI schema with Swagger UI and ReDoc.
 
-Mythological content remains **read-only**: its write methods return `405` on
-both the public and the private routes, for every role.
-
 Phase 4 is under way. Increment 1 delivered JWT token issuance, refresh and
 the protected identity route, validated with manual Postman exercises.
 Increment 2 adds the three editorial groups, created by a data migration, and
 the private read endpoints described above: role and ownership select the
-records, and nested references follow the caller's own rule.
+records, and nested references follow the caller's own rule. Increment 3 opens
+one write operation — the private creation of an entity and its profile, as a
+draft owned by the caller.
 
-Content write operations, the editorial transitions (submission, publication,
-rejection, reopening) and logical deletion or restoration are not implemented
-yet.
+The public routes stay read-only, and so does the private detail URL. Updating,
+the editorial transitions (submission, publication, rejection, reopening),
+logical deletion and restoration, and the nested creation of documentary
+sources and relations are not implemented yet.

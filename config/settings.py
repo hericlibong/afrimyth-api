@@ -187,9 +187,11 @@ SIMPLE_JWT = {
 SPECTACULAR_SETTINGS = {
     "TITLE": "Afrimyth API",
     "DESCRIPTION": (
-        "Read-only API for African mythological figures: divinities, heroes "
-        "and creatures, with their cultural and geographic reference data, "
-        "their relations to one another and their documentary sources."
+        "API for African mythological figures: divinities, heroes and "
+        "creatures, with their cultural and geographic reference data, their "
+        "relations to one another and their documentary sources. Public "
+        "reading is anonymous; editorial work happens behind a token and a "
+        "role."
         "\n\n"
         "## Two distinct read contracts\n\n"
         "`/api/entities/` is **public**: it serves published content to "
@@ -228,15 +230,26 @@ SPECTACULAR_SETTINGS = {
         "Roles are read from group membership on every request, never from a "
         "claim inside the token: a group change takes effect on the next "
         "request, with the same token.\n\n"
-        "## Read-only content\n\n"
-        "Mythological content is read-only. On `/api/entities/` and on "
-        "`/api/manage/entities/`, only `GET` is available; `POST`, `PUT`, "
-        "`PATCH` and `DELETE` are refused with `405 Method Not Allowed`, for "
-        "every role. Write operations and the moderation workflow are planned "
-        "for a later phase and are **not** part of this contract.\n\n"
-        "The `/api/auth/` endpoints are the exception: issuing and refreshing "
-        "a token are `POST` operations, because they carry credentials in the "
-        "request body. They create no content.\n\n"
+        "## Private editorial creation\n\n"
+        "`POST /api/manage/entities/` creates one entity and the profile of "
+        "its type, in a single transaction. The server imposes the owner — the "
+        "authenticated account — and the `draft` status; identifiers, "
+        "technical dates and the review or deletion marks cannot be supplied "
+        "either, and sending one of them is refused rather than ignored. A new "
+        "record is therefore readable at once on the private endpoints by its "
+        "owner, and absent from the public API until it is published.\n\n"
+        "## What can be written, and what cannot\n\n"
+        "The public endpoints stay read-only: on `/api/entities/`, only `GET` "
+        "is available, and every write method is refused with "
+        "`405 Method Not Allowed`. On `/api/manage/entities/`, creation is "
+        "available as described above, while `PUT`, `PATCH` and `DELETE` are "
+        "refused with `405` for every role: updating, the moderation workflow "
+        "— submission, publication, rejection, reopening — and logical "
+        "deletion are planned for later increments and are **not** part of "
+        "this contract. Nested creation of documentary sources and relations "
+        "is deferred with them.\n\n"
+        "The `/api/auth/` endpoints also use `POST`, because they carry "
+        "credentials in the request body; they create no content.\n\n"
         "## Authentication\n\n"
         "`POST /api/auth/token/` exchanges a username and password for an "
         "access token and a refresh token. The access token is then sent as "
@@ -291,9 +304,9 @@ SPECTACULAR_SETTINGS = {
         {
             "name": "management",
             "description": (
-                "Private read access for editorial work, by role. Requires an "
-                "access token and membership of one of the three editorial "
-                "groups."
+                "Private editorial access, by role: reading the corpus and "
+                "creating a draft record. Requires an access token and "
+                "membership of one of the three editorial groups."
             ),
         },
         {

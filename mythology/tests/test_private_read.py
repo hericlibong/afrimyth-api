@@ -774,14 +774,18 @@ def test_une_page_inexistante_renvoie_404(
     assert api(owner).get(PRIVATE_LIST_URL, {"page": 99}).status_code == 404
 
 
-# --- Aucune écriture, pour aucun rôle -----------------------------------
+# --- Les autres écritures restent refusées, pour tous les rôles ---------
+#
+# Seule la création est ouverte depuis l'incrément 3 ; elle est couverte par
+# `test_private_create.py`. Les refus ci-dessous gardent les trois autres
+# méthodes fermées, et le détail privé entièrement en lecture.
 
 
-@pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
-def test_l_ecriture_est_refusee_meme_a_un_administrateur(
+@pytest.mark.parametrize("method", ["put", "patch", "delete"])
+def test_les_autres_ecritures_sont_refusees_meme_a_un_administrateur(
     corpus: dict[str, Entity], method: str
 ) -> None:
-    """Reject writes with 405 even for administrators."""
+    """Reject update and delete with 405 even for administrators."""
     client = api(account("administrateur-ecriture", groups=(ADMINISTRATOR,)))
 
     collection = getattr(client, method)(PRIVATE_LIST_URL)
@@ -792,7 +796,17 @@ def test_l_ecriture_est_refusee_meme_a_un_administrateur(
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
-def test_l_ecriture_est_refusee_a_un_superutilisateur(
+def test_le_detail_prive_n_accepte_aucune_ecriture(
+    corpus: dict[str, Entity], method: str
+) -> None:
+    """Keep the private detail URL read-only, creation included."""
+    client = api(account("administrateur-detail-ecriture", groups=(ADMINISTRATOR,)))
+
+    assert getattr(client, method)(private_detail_url("draft-owner")).status_code == 405
+
+
+@pytest.mark.parametrize("method", ["put", "patch", "delete"])
+def test_les_autres_ecritures_sont_refusees_a_un_superutilisateur(
     corpus: dict[str, Entity], method: str
 ) -> None:
     client = api(account("super-ecriture", is_staff=True, is_superuser=True))

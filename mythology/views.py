@@ -1,4 +1,4 @@
-"""Public and private read-only views using the policies in selectors."""
+"""Public read views and the private editorial views, driven by selectors."""
 
 import re
 from functools import cached_property
@@ -6,7 +6,7 @@ from typing import Any
 
 from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import viewsets
+from rest_framework import mixins, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -27,6 +27,10 @@ from mythology.schema import (
     LIST_EXAMPLE,
     LIST_PARAMETERS,
     PAGE_NOT_FOUND_RESPONSE,
+    PRIVATE_CREATE_DESCRIPTION,
+    PRIVATE_CREATE_INVALID_RESPONSE,
+    PRIVATE_CREATE_REQUEST_EXAMPLE,
+    PRIVATE_CREATE_RESPONSE_EXAMPLE,
     PRIVATE_DETAIL_DESCRIPTION,
     PRIVATE_DETAIL_EXAMPLE,
     PRIVATE_FORBIDDEN_RESPONSE,
@@ -45,6 +49,7 @@ from mythology.selectors import (
 from mythology.serializers import (
     EntityDetailSerializer,
     EntityListSerializer,
+    PrivateEntityCreateSerializer,
     PrivateEntityDetailSerializer,
     PrivateEntityListSerializer,
 )
@@ -243,13 +248,31 @@ class EntityViewSet(EntityNavigationViewSet):
         },
         examples=[PRIVATE_DETAIL_EXAMPLE],
     ),
+    create=extend_schema(
+        operation_id="managed_entities_create",
+        tags=["management"],
+        summary="Create a draft entity with its profile",
+        description=PRIVATE_CREATE_DESCRIPTION,
+        request=PrivateEntityCreateSerializer,
+        responses={
+            201: PrivateEntityDetailSerializer,
+            400: PRIVATE_CREATE_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: PRIVATE_FORBIDDEN_RESPONSE,
+        },
+        examples=[PRIVATE_CREATE_REQUEST_EXAMPLE, PRIVATE_CREATE_RESPONSE_EXAMPLE],
+    ),
 )
-class PrivateEntityViewSet(EntityNavigationViewSet):
-    """Read editorial records permitted by the caller's role and ownership.
+class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
+    """Read editorial records permitted by role and ownership, and create one.
 
     JWT and a business role grant route access; queryset filtering protects
     individual records and list counts. Object permissions alone do not
-    protect a list. Writes remain unavailable for every role.
+    protect a list.
+
+    `CreateModelMixin` is added to a read-only base on purpose, rather than
+    switching to a full `ModelViewSet`: that would also route update and
+    destroy, which belong to later increments and stay refused with `405`.
     """
 
     # Comme sur `me`, seule l'authentification JWT est acceptée : une session
@@ -295,6 +318,8 @@ class PrivateEntityViewSet(EntityNavigationViewSet):
         )
 
     def get_serializer_class(self) -> type[BaseSerializer[Entity]]:
+        if self.action == "create":
+            return PrivateEntityCreateSerializer
         if self.action == "retrieve":
             return PrivateEntityDetailSerializer
         return PrivateEntityListSerializer

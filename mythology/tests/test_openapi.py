@@ -104,21 +104,25 @@ def test_redoc_uses_a_pinned_classic_script(client: Client) -> None:
 # --- Paths and methods --------------------------------------------------
 
 
-def test_content_paths_only_declare_get(schema: dict[str, Any]) -> None:
-    """No write operation is advertised on mythological content.
+#: La seule opération d'écriture de contenu documentée : la création privée.
+#: Tout le reste du corpus reste en lecture seule dans le schéma, y compris le
+#: détail privé. Les routes `/api/auth/` sont exclues : elles portent des
+#: identifiants dans un corps de requête, donc en POST, et ne créent aucun
+#: contenu.
+WRITABLE_OPERATIONS = {"/api/manage/entities/": {"get", "post"}}
 
-    The authentication paths are excluded on purpose: they carry credentials
-    in a request body and therefore have to be POST. They create no content,
-    so this test still proves that nothing can be written to the corpus
-    through a documented operation.
-    """
+
+def test_content_paths_only_declare_their_expected_methods(
+    schema: dict[str, Any],
+) -> None:
+    """Only the private collection advertises a write operation."""
     content_paths = {
         path for path in schema["paths"] if not path.startswith("/api/auth/")
     }
     assert content_paths  # garde-fou : un préfixe mal écrit viderait la boucle
     for path in content_paths:
-        operations = schema["paths"][path]
-        assert set(operations) == {"get"}, f"{path} declares more than GET"
+        expected = WRITABLE_OPERATIONS.get(path, {"get"})
+        assert set(schema["paths"][path]) == expected, path
 
 
 def test_authentication_paths_only_declare_post_or_get(schema: dict[str, Any]) -> None:
@@ -275,6 +279,198 @@ def test_private_list_example_matches_its_component(schema: dict[str, Any]) -> N
     declared = schema["components"]["schemas"]["PrivateEntityList"]["properties"]
 
     assert set(envelope["results"][0]) == set(declared)
+
+
+# --- Private editorial creation -----------------------------------------
+
+PRIVATE_CREATE = "/api/manage/entities/"
+
+#: Les champs d'entrée acceptés par la création, déclarés une fois ici. Le
+#: schéma et le serializer doivent dire la même chose : un champ ajouté au
+#: contrat sans intention apparaîtra comme un écart.
+CREATE_INPUT_FIELDS = {
+    "name",
+    "slug",
+    "entity_type",
+    "gender",
+    "category",
+    "cultural_role",
+    "alignment",
+    "story_description",
+    "characteristics",
+    "physical_signs",
+    "symbols",
+    "power_objects",
+    "symbolic_animals",
+    "manifestations",
+    "primary_country",
+    "secondary_countries",
+    "primary_ethnicity",
+    "secondary_ethnicities",
+    "primary_cultural_area",
+    "secondary_cultural_areas",
+    "domains",
+    "variant_of",
+    "divinity_profile",
+    "hero_profile",
+    "creature_profile",
+}
+
+
+def create_operation(schema: dict[str, Any]) -> dict[str, Any]:
+    operation = schema["paths"][PRIVATE_CREATE]["post"]
+    assert isinstance(operation, dict)
+    return operation
+
+
+def test_creation_requires_a_bearer_token(schema: dict[str, Any]) -> None:
+    """Creation is never offered anonymously."""
+    assert create_operation(schema)["security"] == [{"jwtAuth": []}]
+
+
+def test_creation_declares_its_refusals(schema: dict[str, Any]) -> None:
+    """A reader must know that 400, 401 and 403 mean different things."""
+    responses = create_operation(schema)["responses"]
+
+    assert sorted(responses) == ["201", "400", "401", "403"]
+    assert "JWT" in responses["401"]["description"]
+    assert "contributor" in responses["403"]["description"]
+    assert "nothing was created" in responses["400"]["description"]
+
+
+def test_creation_answers_with_the_private_detail(schema: dict[str, Any]) -> None:
+    """The created record is returned with the private detail representation."""
+    created = create_operation(schema)["responses"]["201"]
+    reference = created["content"]["application/json"]["schema"]["$ref"]
+
+    assert reference.endswith("/PrivateEntityDetail")
+
+
+def test_the_request_body_declares_exactly_the_accepted_fields(
+    schema: dict[str, Any],
+) -> None:
+    """The documented input is the explicit field list, nothing more."""
+    body = create_operation(schema)["requestBody"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+    component = reference.rsplit("/", 1)[-1]
+    declared = schema["components"]["schemas"][component]["properties"]
+
+    assert set(declared) == CREATE_INPUT_FIELDS
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "id",
+        "status",
+        "created_by",
+        "submitted_at",
+        "reviewed_at",
+        "reviewed_by",
+        "review_notes",
+        "deleted_at",
+        "deleted_by",
+        "created_at",
+        "updated_at",
+        "sources",
+        "relations",
+    ],
+)
+def test_no_server_controlled_field_is_offered_as_input(
+    schema: dict[str, Any], field: str
+) -> None:
+    """Swagger must not invite a client to fill a field the server imposes."""
+    body = create_operation(schema)["requestBody"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+    component = reference.rsplit("/", 1)[-1]
+
+    declared = schema["components"]["schemas"][component]["properties"]
+    assert field not in declared
+
+
+def test_the_request_body_requires_the_four_fields(schema: dict[str, Any]) -> None:
+    body = create_operation(schema)["requestBody"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+    component = reference.rsplit("/", 1)[-1]
+
+    required = schema["components"]["schemas"][component]["required"]
+    assert sorted(required) == ["entity_type", "gender", "name", "slug"]
+
+
+def test_the_creation_description_states_what_the_server_imposes(
+    schema: dict[str, Any],
+) -> None:
+    """The contract must say who decides the owner, the status and the rest."""
+    description = create_operation(schema)["description"]
+
+    assert "`draft`" in description
+    assert "created_by" in description
+    assert "not even by an administrator" in description
+    assert "never confirms" in description
+    assert "single transaction" in description
+    assert "`sources` and `relations` cannot be created" in description
+
+
+def test_the_creation_examples_are_labelled_as_synthetic(
+    schema: dict[str, Any],
+) -> None:
+    """Neither example may pass for a validated mythological fact."""
+    operation = create_operation(schema)
+    request = operation["requestBody"]["content"]["application/json"]["examples"]
+    created = operation["responses"]["201"]["content"]["application/json"]["examples"]
+
+    for examples in (request, created):
+        for example in examples.values():
+            text = f"{example.get('summary', '')} {example.get('description', '')}"
+            assert "synthetic" in text.lower() or "invented" in text.lower()
+
+
+def test_the_created_example_matches_the_private_detail_component(
+    schema: dict[str, Any],
+) -> None:
+    """The hand-written 201 example cannot drift from the serializer."""
+    created = create_operation(schema)["responses"]["201"]
+    examples = created["content"]["application/json"]["examples"]
+    example = next(iter(examples.values()))["value"]
+    declared = schema["components"]["schemas"]["PrivateEntityDetail"]["properties"]
+
+    assert set(example) == set(declared)
+    assert example["status"] == "draft"
+
+
+def test_the_request_example_supplies_no_server_controlled_field(
+    schema: dict[str, Any],
+) -> None:
+    request = create_operation(schema)["requestBody"]
+    examples = request["content"]["application/json"]["examples"]
+    example = next(iter(examples.values()))["value"]
+
+    assert set(example) <= CREATE_INPUT_FIELDS
+
+
+def test_the_private_descriptions_no_longer_claim_a_read_only_api(
+    schema: dict[str, Any],
+) -> None:
+    """The texts must not keep announcing that every private route is read-only."""
+    operations = schema["paths"]
+    liste = operations[PRIVATE_CREATE]["get"]["description"]
+    detail = operations["/api/manage/entities/{slug}/"]["get"]["description"]
+
+    assert "`POST` on this collection creates a draft entity" in liste
+    assert "`PUT`, `PATCH` and `DELETE` are refused" in liste
+    assert "creation is a `POST` on the collection" in detail
+    for description in (liste, detail):
+        assert "Write methods are refused with `405" not in description
+
+
+def test_the_global_description_states_what_can_be_written(
+    schema: dict[str, Any],
+) -> None:
+    description = schema["info"]["description"]
+
+    assert "POST /api/manage/entities/" in description
+    assert "stay read-only" in description
+    assert "405" in description
 
 
 def test_the_public_detail_example_stays_on_the_public_route(

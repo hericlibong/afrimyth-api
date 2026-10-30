@@ -126,6 +126,26 @@ class ParameterErrorSerializer(serializers.Serializer[None]):
     country = serializers.ListField(child=serializers.CharField(), required=False)
 
 
+class CreationErrorSerializer(serializers.Serializer[None]):
+    """Validation error body: one key per rejected input field.
+
+    The keys depend on the request, so only the most common ones are declared
+    here. Any accepted or refused field of the creation payload can appear,
+    with a list of messages; a profile key carries an object of messages
+    instead, keyed by the profile field at fault.
+    """
+
+    name = serializers.ListField(child=serializers.CharField(), required=False)
+    slug = serializers.ListField(child=serializers.CharField(), required=False)
+    entity_type = serializers.ListField(child=serializers.CharField(), required=False)
+    gender = serializers.ListField(child=serializers.CharField(), required=False)
+    variant_of = serializers.ListField(child=serializers.CharField(), required=False)
+    status = serializers.ListField(child=serializers.CharField(), required=False)
+    non_field_errors = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
+
+
 # --- Examples -----------------------------------------------------------
 #
 # Chaque exemple est synthétique et étiqueté comme tel, afin qu'il ne soit
@@ -444,7 +464,9 @@ PRIVATE_LIST_DESCRIPTION = (
     "`cultural_area` parameters, with the same validation and the same "
     "ordering. `count` only ever counts records this account may read, and no "
     "parameter can widen that selection.\n\n"
-    "Write methods are refused with `405 Method Not Allowed`, for every role."
+    "`POST` on this collection creates a draft entity; see that operation. "
+    "`PUT`, `PATCH` and `DELETE` are refused with `405 Method Not Allowed`, "
+    "for every role."
 )
 
 PRIVATE_DETAIL_DESCRIPTION = (
@@ -470,7 +492,9 @@ PRIVATE_DETAIL_DESCRIPTION = (
     "references for the same record, which is the intended behaviour.\n\n"
     "The collection's query parameters do not apply here, and cannot change "
     "which records this account may read.\n\n"
-    "Write methods are refused with `405 Method Not Allowed`, for every role."
+    "Write methods are refused on this URL with `405 Method Not Allowed`, for "
+    "every role: creation is a `POST` on the collection, and updating, status "
+    "transitions and deletion are not available yet."
 )
 
 PRIVATE_LIST_EXAMPLE = OpenApiExample(
@@ -511,4 +535,176 @@ PRIVATE_DETAIL_EXAMPLE = OpenApiExample(
         "reviewed_by": None,
         "review_notes": "",
     },
+)
+
+
+# --- Private editorial creation -----------------------------------------
+
+PRIVATE_CREATE_DESCRIPTION = (
+    "Creates one entity and the profile of its type, as a draft owned by the "
+    "calling account. Requires an access token and an editorial role: a "
+    "contributor, a reviewer, an administrator and an active superuser may all "
+    "create.\n\n"
+    "**The server decides four things.** `created_by` is the authenticated "
+    "account, `status` is `draft`, the `id` is generated, and `created_at` and "
+    "`updated_at` are set by the server. None of them can be supplied — not "
+    "even by an administrator — and neither can the review or deletion marks. "
+    "Sending one of these keys returns `400`; it is never silently dropped.\n\n"
+    "**Required fields.** `name`, `slug`, `entity_type` and `gender`. The slug "
+    "is taken as given: it is never generated or suffixed to resolve a "
+    "collision. A name already used by another entity of the same type, or an "
+    "already used slug, returns `400`.\n\n"
+    "**The profile follows the type.** Put it under the matching key — "
+    "`divinity_profile` for `divinity`, `hero_profile` for `hero`, "
+    "`creature_profile` for `creature`. The key may be omitted or sent as "
+    "`{}`, in which case the profile is created with its default values; an "
+    "entity never exists without the profile of its type. The two other keys "
+    "are refused, as is a profile sent as `null`, and a profile cannot name "
+    "its own entity or identifier.\n\n"
+    "**Reference data is attached by identifier**, under the field names the "
+    "detail representation already uses: `primary_country`, "
+    "`secondary_countries`, `primary_ethnicity`, `secondary_ethnicities`, "
+    "`primary_cultural_area`, `secondary_cultural_areas` and `domains`. "
+    "Primary anchors are optional and may be `null`; the collections are "
+    "optional and default to empty. Reference records are never created here, "
+    "and the same value cannot be both a primary anchor and a secondary "
+    "attachment of the same dimension.\n\n"
+    "**`variant_of`** takes the UUID of a figure the calling account may read "
+    "privately. An unreadable record, a deleted record and an unknown "
+    "identifier are all refused with the same message, which never confirms "
+    "that a record exists.\n\n"
+    "**Not available yet.** `sources` and `relations` cannot be created "
+    "together with an entity; sending either returns `400` rather than "
+    "ignoring it. Any other unrecognised key is refused too, so a misspelt "
+    "field name cannot pass unnoticed.\n\n"
+    "**All or nothing.** The entity, its profile and its attachments are "
+    "written in a single transaction. An invalid request returns `400` and "
+    "creates nothing — never an entity without its profile, nor a record with "
+    "half of its attachments.\n\n"
+    "**Response.** `201` with the private detail representation of the new "
+    "record. It is readable at once on the private endpoints by its owner, and "
+    "absent from the public API until it is published."
+)
+
+PRIVATE_CREATE_REQUEST_EXAMPLE = OpenApiExample(
+    "Hero draft with its profile (synthetic)",
+    description=(
+        "Invented figure, shown to illustrate the request shape. The numeric "
+        "values are reference identifiers that have to exist in the database. "
+        "No owner, status, identifier or date appears: the server decides them."
+    ),
+    request_only=True,
+    value={
+        "name": "Example Created Hero",
+        "slug": "example-created-hero",
+        "entity_type": "hero",
+        "gender": "female",
+        "category": "Synthetic subtitle",
+        "story_description": "Synthetic narrative, written for documentation.",
+        "characteristics": ["Synthetic trait"],
+        "primary_country": 1,
+        "secondary_countries": [],
+        "domains": [1],
+        "variant_of": None,
+        "hero_profile": {
+            "titles": ["Synthetic title"],
+            "quests": [],
+        },
+    },
+)
+
+PRIVATE_CREATE_RESPONSE_EXAMPLE = OpenApiExample(
+    "Created draft (synthetic)",
+    description=(
+        "The private detail representation of the record just created. Note "
+        "`status` forced to `draft`, `created_by` set to the calling account, "
+        "the hero profile created with its default values for the fields the "
+        "request omitted, and the two other profile keys left `null`."
+    ),
+    response_only=True,
+    status_codes=["201"],
+    value={
+        **PRIVATE_DETAIL_EXAMPLE.value,
+        "id": "b3f1c0de-0c3a-4a7f-9f1a-5f0b2d6c7e81",
+        "slug": "example-created-hero",
+        "name": "Example Created Hero",
+        "entity_type": "hero",
+        "gender": "female",
+        "status": "draft",
+        "created_by": 1,
+        "submitted_at": None,
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "review_notes": "",
+        "variant_of": None,
+        "relations": [],
+        "sources": [],
+        "created_at": "2026-10-27T09:00:00Z",
+        "updated_at": "2026-10-27T09:00:00Z",
+        "divinity_profile": None,
+        "hero_profile": {
+            "titles": ["Synthetic title"],
+            "achievements": [],
+            "quests": [],
+            "weapons_or_artifacts": [],
+            "legacy": "",
+            "historical_context": "",
+        },
+        "creature_profile": None,
+    },
+)
+
+PRIVATE_CREATE_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "The request was refused and **nothing was created**. One key per "
+        "field at fault, each carrying its messages. A refused key is always "
+        "named: a server-controlled field, a deferred nested collection, a "
+        "profile that does not match the type and an unrecognised field name "
+        "are reported, never ignored."
+    ),
+    examples=[
+        OpenApiExample(
+            "ServerControlledField",
+            response_only=True,
+            value={
+                "status": [
+                    "A new record is always created as a draft; the editorial "
+                    "status cannot be supplied. Submission, publication and "
+                    "rejection are separate actions."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "ProfileDoesNotMatchTheType",
+            response_only=True,
+            value={
+                "divinity_profile": [
+                    "An entity of type 'hero' carries its profile under "
+                    "'hero_profile'; this key is not accepted."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "UnselectableVariant",
+            response_only=True,
+            value={
+                "variant_of": [
+                    "No reference figure selectable by this account matches "
+                    "this identifier."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "DeferredNestedCollection",
+            response_only=True,
+            value={
+                "sources": [
+                    "Creating documentary sources together with an entity is "
+                    "not available yet. Create the entity first; attaching "
+                    "sources comes with a later increment."
+                ]
+            },
+        ),
+    ],
 )

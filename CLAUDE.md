@@ -102,9 +102,10 @@ de pilotage.
 
 Les routes publiques restent strictement publiques : leur sélection et leurs
 champs sont identiques pour tous les appelants, relecteur et superutilisateur
-compris. Les écritures métier restent refusées partout (405) ; transitions de
-statut, attribution automatique du propriétaire, suppression et restauration
-appartiennent aux incréments suivants.
+compris. Depuis l'incrément 3, `POST /api/manage/entities/` crée une entité et
+son profil en brouillon, avec propriétaire automatiquement attribué au compte
+appelant. Modification, transitions de statut, suppression et restauration
+restent indisponibles et appartiennent aux incréments suivants.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données
