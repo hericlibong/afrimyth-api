@@ -117,7 +117,11 @@ le propriétaire et le statut (ADR 0005). Les lots 4A et 4B sont validés après
 revue et exercices Postman. Le lot 4B ouvre POST/PATCH/DELETE individuels
 des sources et relations sous le détail privé, avec les droits de la fiche
 porteuse ; les listes imbriquées restent refusées dans les écritures d'entité.
-Transitions de statut, suppression et restauration restent indisponibles.
+L'incrément 5 est validé après revue et exercices Postman : POST submit,
+withdraw et resume appliquent les trois transitions de contribution prévues
+par l'ADR 0002. Le droit de transition est distinct du droit de PATCH.
+Publication, rejet, réouverture d'une fiche publiée, suppression et restauration
+restent indisponibles et relèvent des incréments suivants.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données

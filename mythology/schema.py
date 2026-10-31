@@ -493,10 +493,12 @@ PRIVATE_DETAIL_DESCRIPTION = (
     "The collection's query parameters do not apply here, and cannot change "
     "which records this account may read.\n\n"
     "`PATCH` updates this record; see that operation. Its documentary sources "
-    "and relations are written one by one under `sources/` and `relations/`. "
-    "`PUT` and `DELETE` are refused with `405 Method Not Allowed`, for every "
-    "role, and creation is a `POST` on the collection. Status transitions and "
-    "the deletion of an entity are not available yet."
+    "and relations are written one by one under `sources/` and `relations/`, "
+    "and it is submitted, withdrawn or resumed by a `POST` on `submit/`, "
+    "`withdraw/` or `resume/`. `PUT` and `DELETE` are refused with "
+    "`405 Method Not Allowed`, for every role, and creation is a `POST` on the "
+    "collection. Publication, rejection, reopening and the deletion of an "
+    "entity are not available yet."
 )
 
 PRIVATE_LIST_EXAMPLE = OpenApiExample(
@@ -1087,6 +1089,139 @@ CHILD_INVALID_RESPONSE = OpenApiResponse(
                     "The record this belongs to comes from the URL; it cannot "
                     "be supplied, and an existing row is never moved to "
                     "another record."
+                ]
+            },
+        ),
+    ],
+)
+
+
+# --- Editorial transitions ----------------------------------------------
+#
+# Trois actions, un seul contrat d'accès et de corps. Les parties communes
+# sont assemblées une fois.
+
+TRANSITION_ACCESS = (
+    "Requires an access token and an editorial role. The actor must be the "
+    "record's **own contributor**, a reviewer or an administrator; a reviewer "
+    "and an administrator may act on a record that has no owner. A record "
+    "this account may read without being one of those actors returns `403`, "
+    "and an unknown slug, an unreadable record and a deleted record all "
+    "return the same `404`. No transition ever changes the owner.\n\n"
+)
+
+TRANSITION_BODY = (
+    "**No input.** Send no body at all, or an empty JSON object `{}`. Any "
+    "other body — a non-empty object, an array, a string — returns `400` "
+    "rather than being ignored: there is no status, date, actor, review note "
+    "or business field to supply here.\n\n"
+)
+
+TRANSITION_RESULT = (
+    "Only the editorial state is written, in a single transaction, on the "
+    "locked row: the owner, the type, the business fields, the profile, the "
+    "reference data, the sources and the relations are untouched, and "
+    "`updated_at` moves only on success. A refused request changes nothing at "
+    "all.\n\n"
+    "**Response.** `200` with the private detail representation of the "
+    "record, whose nested references follow the calling account's own read "
+    "rule, exactly as on the private detail endpoint."
+)
+
+SUBMIT_DESCRIPTION = (
+    "Submits a `draft` record for review: its status becomes `submitted` and "
+    "`submitted_at` is set to the server's current time.\n\n"
+    + TRANSITION_ACCESS
+    + "**Only a draft can be submitted.** Any other starting status returns "
+    "`400`, which is also what a second submission of the same record "
+    "returns.\n\n"
+    "**A submission opens a fresh review.** `reviewed_at`, `reviewed_by` and "
+    "`review_notes` are cleared, so an earlier decision cannot look as though "
+    "it concerned this submission. Submitting is neither a publication nor a "
+    "documentary certification, and no completeness threshold is checked: "
+    "nothing is filled in or repaired on the way.\n\n"
+    "While a record is `submitted`, its own contributor keeps reading it but "
+    "may no longer update it, nor write its sources and relations; a reviewer "
+    "still may.\n\n" + TRANSITION_BODY + TRANSITION_RESULT
+)
+
+WITHDRAW_DESCRIPTION = (
+    "Withdraws a `submitted` record: its status returns to `draft` and "
+    "`submitted_at` is cleared.\n\n"
+    + TRANSITION_ACCESS
+    + "**Only a submitted record can be withdrawn.** Any other starting "
+    "status returns `400`.\n\n"
+    "**A withdrawal is not a rejection.** `reviewed_at`, `reviewed_by` and "
+    "`review_notes` are left exactly as they were. Once back to `draft`, the "
+    "ordinary update rights of a draft apply again, for the record and for "
+    "its sources and relations.\n\n" + TRANSITION_BODY + TRANSITION_RESULT
+)
+
+RESUME_DESCRIPTION = (
+    "Resumes a `rejected` record: its status returns to `draft` and "
+    "`submitted_at` is cleared.\n\n"
+    + TRANSITION_ACCESS
+    + "**Only a rejected record can be resumed.** Any other starting status "
+    "returns `400`.\n\n"
+    "**The last review is kept** — `reviewed_at`, `reviewed_by` and "
+    "`review_notes` — so the corrections can be guided by it. It is cleared "
+    "by the next submission. These fields carry the current state and the "
+    "last review kept, not an exhaustive history.\n\n"
+    + TRANSITION_BODY
+    + TRANSITION_RESULT
+)
+
+TRANSITION_FORBIDDEN_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "Either the token is valid but its account holds no editorial role, or "
+        "the account may read this record without being an actor of its "
+        "transitions — a contributor facing a record owned by someone else, "
+        "for instance. The body distinguishes the two cases."
+    ),
+    examples=[
+        OpenApiExample(
+            "NotAnActorOfThisRecord",
+            response_only=True,
+            value={
+                "detail": (
+                    "This account may read this record but not run an "
+                    "editorial transition on it. Submitting, withdrawing and "
+                    "resuming require being the record's own contributor, a "
+                    "reviewer or an administrator."
+                )
+            },
+        )
+    ],
+)
+
+TRANSITION_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "The record was **not** changed: either its starting status does not "
+        "allow this transition — which includes repeating an action that has "
+        "already succeeded — or the request carried a body. No date, note or "
+        "field is written in either case."
+    ),
+    examples=[
+        OpenApiExample(
+            "WrongStartingStatus",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "Only a draft record can be submitted for review. This "
+                    "record is currently 'submitted'."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "UnexpectedBody",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "This action takes no input. Send no body at all, or an "
+                    "empty JSON object `{}`; any other body is refused rather "
+                    "than ignored."
                 ]
             },
         ),

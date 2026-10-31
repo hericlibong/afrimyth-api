@@ -86,6 +86,9 @@ def test_schema_generation_does_not_need_published_data(
         "/api/manage/entities/{slug}/sources/{source_id}/",
         "/api/manage/entities/{slug}/relations/",
         "/api/manage/entities/{slug}/relations/{relation_id}/",
+        "/api/manage/entities/{slug}/submit/",
+        "/api/manage/entities/{slug}/withdraw/",
+        "/api/manage/entities/{slug}/resume/",
         "/api/auth/token/",
         "/api/auth/token/refresh/",
         "/api/auth/me/",
@@ -120,6 +123,9 @@ WRITABLE_OPERATIONS = {
     "/api/manage/entities/{slug}/sources/{source_id}/": {"patch", "delete"},
     "/api/manage/entities/{slug}/relations/": {"post"},
     "/api/manage/entities/{slug}/relations/{relation_id}/": {"patch", "delete"},
+    "/api/manage/entities/{slug}/submit/": {"post"},
+    "/api/manage/entities/{slug}/withdraw/": {"post"},
+    "/api/manage/entities/{slug}/resume/": {"post"},
 }
 
 
@@ -160,6 +166,9 @@ PROTECTED_PATHS = {
     "/api/manage/entities/{slug}/sources/{source_id}/",
     "/api/manage/entities/{slug}/relations/",
     "/api/manage/entities/{slug}/relations/{relation_id}/",
+    "/api/manage/entities/{slug}/submit/",
+    "/api/manage/entities/{slug}/withdraw/",
+    "/api/manage/entities/{slug}/resume/",
 }
 
 
@@ -732,6 +741,107 @@ def test_child_validation_errors_accept_the_actual_field_names(
                 "type": "array",
                 "items": {"type": "string"},
             }
+
+
+# --- Editorial transitions ----------------------------------------------
+
+TRANSITION_PATHS = {
+    "submit": "/api/manage/entities/{slug}/submit/",
+    "withdraw": "/api/manage/entities/{slug}/withdraw/",
+    "resume": "/api/manage/entities/{slug}/resume/",
+}
+
+TRANSITION_NAMES = sorted(TRANSITION_PATHS)
+
+
+def transition_operation(schema: dict[str, Any], action: str) -> dict[str, Any]:
+    operation = schema["paths"][TRANSITION_PATHS[action]]["post"]
+    assert isinstance(operation, dict)
+    return operation
+
+
+@pytest.mark.parametrize("action", TRANSITION_NAMES)
+def test_a_transition_is_protected_and_declares_its_refusals(
+    schema: dict[str, Any], action: str
+) -> None:
+    """Each transition needs a token and documents 400, 401, 403 and 404."""
+    operation = transition_operation(schema, action)
+
+    assert operation["security"] == [{"jwtAuth": []}]
+    assert sorted(operation["responses"]) == ["200", "400", "401", "403", "404"]
+    assert "an actor of its transitions" in operation["responses"]["403"]["description"]
+    assert "was **not** changed" in operation["responses"]["400"]["description"]
+
+
+@pytest.mark.parametrize("action", TRANSITION_NAMES)
+def test_a_transition_takes_no_input_and_documents_the_two_empty_forms(
+    schema: dict[str, Any], action: str
+) -> None:
+    """No request body is declared, and the accepted empty forms are stated."""
+    operation = transition_operation(schema, action)
+
+    assert "requestBody" not in operation
+    assert (
+        "Send no body at all, or an empty JSON object `{}`"
+        in (operation["description"])
+    )
+
+
+@pytest.mark.parametrize("action", TRANSITION_NAMES)
+def test_a_transition_answers_with_the_private_detail(
+    schema: dict[str, Any], action: str
+) -> None:
+    body = transition_operation(schema, action)["responses"]["200"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+
+    assert reference.endswith("/PrivateEntityDetail")
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("submit", "`draft` record for review"),
+        ("withdraw", "`submitted` record"),
+        ("resume", "`rejected` record"),
+    ],
+)
+def test_a_transition_states_its_starting_status(
+    schema: dict[str, Any], action: str, expected: str
+) -> None:
+    description = transition_operation(schema, action)["description"]
+
+    assert expected in description
+    assert "a reviewer or an administrator" in description
+
+
+def test_the_transitions_state_what_happens_to_the_review_marks(
+    schema: dict[str, Any],
+) -> None:
+    """Each action says what it does with the dates and the last review."""
+    submit = transition_operation(schema, "submit")["description"]
+    withdraw = transition_operation(schema, "withdraw")["description"]
+    resume = transition_operation(schema, "resume")["description"]
+
+    assert "A submission opens a fresh review" in submit
+    assert "neither a publication nor a documentary certification" in submit
+    assert "A withdrawal is not a rejection" in withdraw
+    assert "left exactly as they were" in withdraw
+    assert "**The last review is kept**" in resume
+    assert "cleared by the next submission" in resume
+
+
+def test_no_moderation_decision_is_announced(schema: dict[str, Any]) -> None:
+    """Publication, rejection and reopening must not look available."""
+    description = schema["info"]["description"]
+    detail = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["description"]
+
+    assert "publication, rejection" in description
+    assert "not** part of this" in description
+    assert "Publication, rejection, reopening" in detail
+    assert "On the entity collection and detail themselves" in description
+    assert "clear `submitted_at` and preserve the review marks" in description
+    for path in TRANSITION_PATHS.values():
+        assert set(schema["paths"][path]) == {"post"}, path
 
 
 def test_the_private_descriptions_no_longer_claim_a_read_only_api(

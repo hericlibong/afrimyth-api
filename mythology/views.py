@@ -1,7 +1,7 @@
 """Public read views and the private editorial views, driven by selectors."""
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from functools import cached_property
 from typing import Any
@@ -56,11 +56,16 @@ from mythology.schema import (
     RELATION_ID_PARAMETER,
     RELATION_REQUEST_EXAMPLE,
     RELATION_UPDATE_DESCRIPTION,
+    RESUME_DESCRIPTION,
     SOURCE_CREATE_DESCRIPTION,
     SOURCE_DELETE_DESCRIPTION,
     SOURCE_ID_PARAMETER,
     SOURCE_REQUEST_EXAMPLE,
     SOURCE_UPDATE_DESCRIPTION,
+    SUBMIT_DESCRIPTION,
+    TRANSITION_FORBIDDEN_RESPONSE,
+    TRANSITION_INVALID_RESPONSE,
+    WITHDRAW_DESCRIPTION,
 )
 from mythology.selectors import (
     filter_entities,
@@ -82,6 +87,18 @@ from mythology.serializers import (
     RelationWriteSerializer,
     SourceSerializer,
     SourceWriteSerializer,
+)
+from mythology.transitions import (
+    EMPTY_BODY_MESSAGE,
+    NOT_ALLOWED_MESSAGE,
+    REQUIRED_STATUS,
+    RESUME,
+    SUBMIT,
+    TRANSITION_ACTIONS,
+    WITHDRAW,
+    apply_transition,
+    may_transition,
+    wrong_status_reason,
 )
 
 #: Un code ISO 3166-1 alpha-2 : exactement deux lettres. Un format invalide
@@ -365,7 +382,7 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
                 roles=self.caller_roles, caller_id=self.caller_id
             )
         private = private_entities(roles=self.caller_roles, caller_id=self.caller_id)
-        if self.action in CHILD_ACTIONS:
+        if self.action in CHILD_ACTIONS | TRANSITION_ACTIONS:
             return private
         return filter_entities(
             private,
@@ -598,3 +615,102 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
                 return Response(status=status.HTTP_204_NO_CONTENT)
             self.saved_child(RelationWriteSerializer, instance=relation)
         return Response(EntityRelationSerializer(relation).data)
+
+    # --- Transitions éditoriales ----------------------------------------
+
+    def run_transition(self, action: str) -> Response:
+        """Run one transition and answer with the private detail of the record.
+
+        The order of the refusals is the contract: the private selection
+        decides the `404`, the actor rule the `403`, then the start status and
+        the body the `400`. Everything is re-evaluated on the locked row, so
+        two concurrent submissions cannot both succeed.
+        """
+        entity = self.get_object()
+        with transaction.atomic():
+            locked = get_object_or_404(
+                private_entities(
+                    roles=self.caller_roles, caller_id=self.caller_id
+                ).select_for_update(),
+                pk=entity.pk,
+            )
+            if not may_transition(
+                locked, roles=self.caller_roles, caller_id=self.caller_id
+            ):
+                raise PermissionDenied(NOT_ALLOWED_MESSAGE)
+            if locked.status != REQUIRED_STATUS[action]:
+                raise ValidationError(
+                    {"non_field_errors": [wrong_status_reason(locked, action)]}
+                )
+            if not (isinstance(self.request.data, Mapping) and not self.request.data):
+                raise ValidationError({"non_field_errors": [EMPTY_BODY_MESSAGE]})
+            apply_transition(locked, action)
+        return self.private_detail_of(locked)
+
+    def private_detail_of(self, entity: Entity) -> Response:
+        """Render one record with the private detail, references filtered."""
+        loaded = private_entity_detail(
+            roles=self.caller_roles, caller_id=self.caller_id
+        ).get(pk=entity.pk)
+        return Response(
+            PrivateEntityDetailSerializer(
+                loaded, context=self.get_serializer_context()
+            ).data
+        )
+
+    @extend_schema(
+        operation_id="managed_entities_submit",
+        tags=["management"],
+        summary="Submit a draft record for review",
+        description=SUBMIT_DESCRIPTION,
+        request=None,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: TRANSITION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="submit", url_name="submit")
+    def submit(self, request: Request, **kwargs: Any) -> Response:
+        """Move a draft record to `submitted` and open a fresh review."""
+        return self.run_transition(SUBMIT)
+
+    @extend_schema(
+        operation_id="managed_entities_withdraw",
+        tags=["management"],
+        summary="Withdraw a submitted record",
+        description=WITHDRAW_DESCRIPTION,
+        request=None,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: TRANSITION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="withdraw", url_name="withdraw")
+    def withdraw(self, request: Request, **kwargs: Any) -> Response:
+        """Move a submitted record back to `draft`, keeping the review marks."""
+        return self.run_transition(WITHDRAW)
+
+    @extend_schema(
+        operation_id="managed_entities_resume",
+        tags=["management"],
+        summary="Resume a rejected record as a draft",
+        description=RESUME_DESCRIPTION,
+        request=None,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: TRANSITION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="resume", url_name="resume")
+    def resume(self, request: Request, **kwargs: Any) -> Response:
+        """Move a rejected record back to `draft`, keeping the last review."""
+        return self.run_transition(RESUME)

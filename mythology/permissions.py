@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from mythology.models import Entity
 from mythology.selectors import is_privately_editable
+from mythology.transitions import TRANSITION_ACTIONS
 
 #: Message du 403 d'une fiche lisible mais non modifiable. Public, donc en
 #: anglais ; partagé avec le refus posé sur l'état verrouillé à l'écriture.
@@ -69,6 +70,11 @@ class CanEditEntity(BasePermission):
     ) -> bool:
         """Refuse an unsafe method on a record this account may not modify."""
         if request.method in SAFE_METHODS:
+            return True
+        # Une transition n'est pas une écriture ordinaire : un contributeur
+        # retire sa propre fiche soumise, que cette règle lui refuse justement
+        # de modifier. Son droit est décidé par `may_transition()`.
+        if getattr(view, "action", None) in TRANSITION_ACTIONS:
             return True
         return is_privately_editable(
             obj,

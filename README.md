@@ -105,8 +105,8 @@ The corpus is served by two distinct pairs of routes, and they never mix.
 | `/api/manage/entities/…` | access token **and** an editorial role | the editorial view of the corpus, by role and ownership |
 
 The private routes are also where a record, its profile, its attachments, its
-documentary sources and its relations are written; the public routes carry no
-write operation at all.
+documentary sources and its relations are written, and where it is submitted,
+withdrawn or resumed; the public routes carry no write operation at all.
 
 The public routes behave identically for every caller. A reviewer's or a
 superuser's token changes neither their selection nor their payload: the
@@ -247,7 +247,7 @@ Creating a record happens on the private collection described below.
 
 ## Private editorial API
 
-Ten endpoints for editorial work. They require an access token **and**
+Thirteen endpoints for editorial work. They require an access token **and**
 membership of one of three editorial groups.
 
 | Endpoint | Returns |
@@ -257,6 +257,7 @@ membership of one of three editorial groups.
 | `POST /api/manage/entities/` | creates one entity and the profile of its type, as a draft owned by the caller; answers `201` with the private detail payload |
 | `PATCH /api/manage/entities/{slug}/` | updates the business fields, the existing profile and the attachments; answers `200` with the private detail payload |
 | six routes under `{slug}/sources/` and `{slug}/relations/` | create, update and delete the record's documentary sources and relations, one row at a time — see below |
+| `POST {slug}/submit/`, `{slug}/withdraw/`, `{slug}/resume/` | submit a draft for review, withdraw a submission, resume a rejected record; answers `200` with the private detail payload |
 
 ```bash
 curl http://127.0.0.1:8000/api/manage/entities/ \
@@ -269,13 +270,13 @@ Roles are three Django groups — `contributor`, `reviewer` and
 `administrator` — created by a data migration. There is no `role` field on the
 account.
 
-| Caller | Reads on these routes | Creates | Updates |
-|---|---|---|---|
-| anonymous, or an unusable token | `401` | no | no |
-| authenticated, no editorial role | `403`, even for a published record | no | no |
-| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes | its own `draft` and `rejected` |
-| reviewer | every record that has not been deleted | yes | every `draft`, `rejected` and `submitted` |
-| administrator, superuser | every record that has not been deleted | yes | every record that has not been deleted |
+| Caller | Reads on these routes | Creates | Updates | Submits, withdraws, resumes |
+|---|---|---|---|---|
+| anonymous, or an unusable token | `401` | no | no | no |
+| authenticated, no editorial role | `403`, even for a published record | no | no | no |
+| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes | its own `draft` and `rejected` | its own records |
+| reviewer | every record that has not been deleted | yes | every `draft`, `rejected` and `submitted` | every record, owner or not |
+| administrator, superuser | every record that has not been deleted | yes | every record that has not been deleted | every record, owner or not |
 
 **Reading does not imply updating.** A contributor reads a published record
 but does not modify it; so does a reviewer. A record this account may read and
@@ -519,13 +520,73 @@ ever deleted here, and there is no recycle bin or history for a child. A
 relation towards a target this account may not read stays unreachable, with the
 same `404`, even if its identifier is guessed.
 
+### Submit, withdraw and resume a record
+
+Three `POST` actions move one record between `draft` and `submitted`. They take
+no input.
+
+| Route under `/api/manage/entities/{slug}/` | Allowed transition |
+|---|---|
+| `submit/` | `draft` → `submitted` |
+| `withdraw/` | `submitted` → `draft` |
+| `resume/` | `rejected` → `draft` |
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/submit/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+**Who may act.** The record's **own contributor**, a reviewer or an
+administrator — the same three actors for all three actions. A reviewer and an
+administrator also act on a record that has no owner. This is **not** the
+ordinary update right: a contributor may withdraw its own `submitted` record
+even though it may no longer `PATCH` it. No transition changes the owner.
+
+**No input.** Send no body at all, or an empty JSON object `{}`. Any other body
+— a non-empty object, an array, a string — returns `400` rather than being
+ignored. There is no status, date, actor, review note or business field to
+supply.
+
+**What each action writes.**
+
+| Action | Writes |
+|---|---|
+| `submit/` | `status` = `submitted`, `submitted_at` = now, and clears `reviewed_at`, `reviewed_by` and `review_notes` — a submission opens a fresh review |
+| `withdraw/` | `status` = `draft`, `submitted_at` = `null`; the review marks are left untouched, because a withdrawal is not a rejection |
+| `resume/` | `status` = `draft`, `submitted_at` = `null`; the last review is **kept**, to guide the corrections, and is cleared by the next submission |
+
+Nothing else moves: the owner, the type, the business fields, the profile, the
+reference data, the sources, the relations, the deletion marks and `created_at`
+are untouched, and `updated_at` moves only on success. These fields carry the
+current state and the last review kept, not an exhaustive history.
+
+Submitting is neither a publication nor a documentary certification: no
+completeness threshold is checked, and nothing is filled in or repaired on the
+way. While a record is `submitted`, its own contributor keeps reading it but may
+no longer update it, nor write its sources and relations; a reviewer still may.
+After a withdrawal or a resumption, the ordinary rights of a `draft` apply
+again.
+
+| Situation | Response |
+|---|---|
+| Done | `200` with the private detail payload, references filtered for the caller |
+| Wrong starting status, including repeating an action that already succeeded | `400`, nothing written |
+| A body was sent | `400`, nothing written |
+| No token, or an unusable one | `401` |
+| No editorial role, or a record this account may read without being one of its actors | `403` |
+| Unknown slug, unreadable record, or deleted record | `404`, with the same body in all three cases |
+
+Each action runs in one transaction, re-reading the record's visibility, the
+actor's right and the status on the locked row, so two concurrent submissions
+cannot both succeed.
+
 ### The other writes are still refused
 
 `PUT` and `DELETE` are refused with `405` on both private entity URLs, for every
-role, superuser included, and `POST` is refused on the private detail URL. Full
-replacement, the editorial transitions — submission, publication, rejection,
-reopening — and the logical deletion or restoration of an entity belong to later
-increments.
+role, superuser included, and `POST` is refused on the private detail URL. The
+transition routes accept `POST` only. Full replacement, the moderation
+decisions — publication, rejection, reopening — and the logical deletion or
+restoration of an entity belong to later increments.
 
 ## Authentication
 
@@ -726,9 +787,11 @@ the private creation of an entity and its profile, as a draft owned by the
 caller. Increment 4A adds the private partial update of the business fields,
 the existing profile and the reference attachments, by role, ownership and
 status. Increment 4B adds the write routes of a record's documentary sources
-and relations, one row at a time, under the same rights.
+and relations, one row at a time, under the same rights. Increment 5 adds the
+submission of a draft, the withdrawal of a submission and the resumption of a
+rejected record.
 
-The public routes stay read-only. Full replacement and deletion of entities stay refused,
-and the editorial transitions (submission, publication, rejection, reopening),
+The public routes stay read-only. Full replacement and deletion of entities stay
+refused, and the moderation decisions (publication, rejection, reopening),
 logical deletion and restoration, and the reclassification of an entity's type
 are not implemented yet.
