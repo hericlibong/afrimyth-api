@@ -1,12 +1,18 @@
+import os
+import runpy
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
+import pytest
 from django.conf import settings
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from config import settings as project_settings
 
 
 def test_modele_utilisateur_personnalise_est_actif() -> None:
@@ -40,14 +46,32 @@ def test_les_reglages_drf_ne_sont_pas_le_repli_vide() -> None:
 
 
 def test_durees_de_jetons_jwt() -> None:
-    """Use short access tokens, one-day refresh tokens and no rotation."""
-    assert api_settings_jwt_lifetime("ACCESS_TOKEN_LIFETIME") == timedelta(minutes=5)
+    """Use development-only longer access tokens and one-day refresh tokens."""
+    minutes = (
+        int(os.environ.get("JWT_DEV_ACCESS_MINUTES", "20"))
+        if project_settings.DEBUG
+        else 5
+    )
+    assert api_settings_jwt_lifetime("ACCESS_TOKEN_LIFETIME") == timedelta(
+        minutes=minutes
+    )
     assert api_settings_jwt_lifetime("REFRESH_TOKEN_LIFETIME") == timedelta(days=1)
     assert settings.SIMPLE_JWT["ROTATE_REFRESH_TOKENS"] is False
     assert settings.SIMPLE_JWT["BLACKLIST_AFTER_ROTATION"] is False
     # Sans application de liste noire installée, aucune révocation n'est
     # possible : c'est une limite assumée de cet incrément, pas un oubli.
     assert "rest_framework_simplejwt.token_blacklist" not in settings.INSTALLED_APPS
+
+
+@pytest.mark.parametrize("debug, minutes", [("True", 20), ("False", 5)])
+def test_access_extension_is_development_only(
+    monkeypatch: pytest.MonkeyPatch, debug: str, minutes: int
+) -> None:
+    """Ignore the development lifetime override when debug is disabled."""
+    monkeypatch.setenv("DJANGO_DEBUG", debug)
+    monkeypatch.setenv("JWT_DEV_ACCESS_MINUTES", "20")
+    config = runpy.run_path(str(Path(settings.BASE_DIR) / "config" / "settings.py"))
+    assert config["SIMPLE_JWT"]["ACCESS_TOKEN_LIFETIME"] == timedelta(minutes=minutes)
 
 
 def api_settings_jwt_lifetime(name: str) -> timedelta:

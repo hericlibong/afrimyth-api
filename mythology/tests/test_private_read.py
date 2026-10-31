@@ -776,16 +776,16 @@ def test_une_page_inexistante_renvoie_404(
 
 # --- Les autres écritures restent refusées, pour tous les rôles ---------
 #
-# Seule la création est ouverte depuis l'incrément 3 ; elle est couverte par
-# `test_private_create.py`. Les refus ci-dessous gardent les trois autres
-# méthodes fermées, et le détail privé entièrement en lecture.
+# La création et la modification partielle ont leurs propres suites,
+# `test_private_create.py` et `test_private_update.py`. Les refus ci-dessous
+# gardent fermé tout le reste.
 
 
-@pytest.mark.parametrize("method", ["put", "patch", "delete"])
-def test_les_autres_ecritures_sont_refusees_meme_a_un_administrateur(
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_le_remplacement_et_la_suppression_sont_refuses_meme_a_un_administrateur(
     corpus: dict[str, Entity], method: str
 ) -> None:
-    """Reject update and delete with 405 even for administrators."""
+    """Reject replacement and deletion with 405 even for administrators."""
     client = api(account("administrateur-ecriture", groups=(ADMINISTRATOR,)))
 
     collection = getattr(client, method)(PRIVATE_LIST_URL)
@@ -795,18 +795,18 @@ def test_les_autres_ecritures_sont_refusees_meme_a_un_administrateur(
     assert fiche.status_code == 405
 
 
-@pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
-def test_le_detail_prive_n_accepte_aucune_ecriture(
+@pytest.mark.parametrize("method", ["post", "put", "delete"])
+def test_le_detail_prive_n_accepte_que_la_modification_partielle(
     corpus: dict[str, Entity], method: str
 ) -> None:
-    """Keep the private detail URL read-only, creation included."""
+    """Keep every write but `PATCH` closed on the private detail URL."""
     client = api(account("administrateur-detail-ecriture", groups=(ADMINISTRATOR,)))
 
     assert getattr(client, method)(private_detail_url("draft-owner")).status_code == 405
 
 
 @pytest.mark.parametrize("method", ["put", "patch", "delete"])
-def test_les_autres_ecritures_sont_refusees_a_un_superutilisateur(
+def test_les_ecritures_de_la_collection_sont_refusees_a_un_superutilisateur(
     corpus: dict[str, Entity], method: str
 ) -> None:
     client = api(account("super-ecriture", is_staff=True, is_superuser=True))
@@ -835,12 +835,13 @@ def test_la_vue_privee_n_accepte_que_jwt_et_exige_un_role() -> None:
     from rest_framework.permissions import IsAuthenticated
     from rest_framework_simplejwt.authentication import JWTAuthentication
 
-    from mythology.permissions import HasBusinessRole
+    from mythology.permissions import CanEditEntity, HasBusinessRole
 
     assert PrivateEntityViewSet.authentication_classes == [JWTAuthentication]
     assert PrivateEntityViewSet.permission_classes == [
         IsAuthenticated,
         HasBusinessRole,
+        CanEditEntity,
     ]
 
 

@@ -1,11 +1,13 @@
-"""Read and create serializers for the mythology domain.
+"""Read and write serializers for the mythology domain.
 
 Four read representations of `Entity`: a compact one and a detailed one for
 the **public** collection and detail, and their **private** counterparts,
 which add the editorial fields and apply the caller's own visibility rule to
-nested references. One write representation, `PrivateEntityCreateSerializer`,
-which creates a draft entity and its profile on the private collection.
-Updating, status transitions and deletion arrive with later increments.
+nested references. Four write representations: `PrivateEntityCreateSerializer`
+creates a draft entity with its profile, `PrivateEntityUpdateSerializer`
+patches an existing one, and `SourceWriteSerializer` and
+`RelationWriteSerializer` write one child row of a record. Status transitions,
+deletion and restoration arrive with later increments.
 
 The private representations are subclasses, not copies: they inherit every
 business field and only declare what differs. Nothing switches a public
@@ -20,13 +22,14 @@ stays in French comments.
 """
 
 import uuid
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, TypeVar
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import models, transaction
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from accounts.models import User
 from mythology.models import (
@@ -43,13 +46,19 @@ from mythology.models import (
     HeroProfile,
     Source,
 )
+from mythology.permissions import NOT_EDITABLE_MESSAGE
 from mythology.selectors import (
+    is_privately_editable,
     is_privately_readable,
     is_publicly_visible,
     private_entities,
     private_entity_detail,
 )
 from mythology.services import create_entity_with_profile
+
+#: Les deux enfants d'une fiche partagent exactement le même mécanisme
+#: d'écriture ; seule leur table diffère.
+ChildT = TypeVar("ChildT", Source, EntityRelation)
 
 
 class SourceSerializer(serializers.ModelSerializer[Source]):
@@ -498,17 +507,18 @@ TIMESTAMP_REASON = (
     "Technical timestamps are set by the server; they cannot be supplied."
 )
 NESTED_SOURCES_REASON = (
-    "Creating documentary sources together with an entity is not available "
-    "yet. Create the entity first; attaching sources comes with a later "
-    "increment."
+    "Documentary sources are not created together with an entity. Create the "
+    "entity first, then post each source to "
+    "`/api/manage/entities/{slug}/sources/`."
 )
 NESTED_RELATIONS_REASON = (
-    "Creating relations together with an entity is not available yet. Create "
-    "the entity first; attaching relations comes with a later increment."
+    "Relations are not created together with an entity. Create the entity "
+    "first, then post each relation to "
+    "`/api/manage/entities/{slug}/relations/`."
 )
 PROFILE_ATTACHMENT_REASON = (
-    "The profile is attached to the created entity automatically; it cannot "
-    "name its entity."
+    "The profile is attached to its entity by the server; it cannot name an "
+    "entity itself."
 )
 UNKNOWN_ENTITY_FIELD_REASON = "Unknown input field for entity creation."
 UNKNOWN_PROFILE_FIELD_REASON = "Unknown input field for this profile."
@@ -572,6 +582,40 @@ def attach_collections(
         getattr(entity, name).set(values)
 
 
+def rejected_key_errors(
+    data: Mapping[str, Any],
+    accepted: Collection[str],
+    *,
+    rejected: Mapping[str, str],
+    unknown_reason: str,
+) -> dict[str, list[str]]:
+    """Name every key an operation refuses, instead of dropping it silently."""
+    return {
+        name: [rejected.get(name, unknown_reason)]
+        for name in data
+        if name in rejected or name not in accepted
+    }
+
+
+def save_validated(instance: models.Model) -> None:
+    """Run the model's own validation, then save, reporting failures as 400."""
+    try:
+        instance.full_clean()
+    except DjangoValidationError as error:
+        raise serializers.ValidationError(
+            serializers.as_serializer_error(error)
+        ) from error
+    instance.save()
+
+
+def patched_and_saved(instance: ChildT, validated_data: Mapping[str, Any]) -> ChildT:
+    """Apply a partial patch to a child row, validate it, then save it."""
+    for field, value in validated_data.items():
+        setattr(instance, field, value)
+    save_validated(instance)
+    return instance
+
+
 def string_array_errors(
     data: Mapping[str, Any], fields: Mapping[str, Any]
 ) -> dict[str, list[str]]:
@@ -604,6 +648,11 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
     existing identifiers; server-controlled fields and nested sources or
     relations are refused. Success returns the private detail representation.
     """
+
+    #: Surchargés par le serializer de modification : mêmes mécanismes, autres
+    #: raisons — un PATCH ne « crée » rien et refuse `entity_type`.
+    rejected_fields = REJECTED_ENTITY_FIELDS
+    unknown_field_reason = UNKNOWN_ENTITY_FIELD_REASON
 
     # Profil absent ou vide accepté ; null refusé. Le type est vérifié dans validate().
     divinity_profile = DivinityProfileSerializer(required=False)
@@ -663,11 +712,12 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
 
     def reject_entity_keys(self, data: Mapping[str, Any]) -> None:
         """Report every top-level key this operation does not accept."""
-        errors = {
-            name: [REJECTED_ENTITY_FIELDS.get(name, UNKNOWN_ENTITY_FIELD_REASON)]
-            for name in data
-            if name in REJECTED_ENTITY_FIELDS or name not in self.fields
-        }
+        errors = rejected_key_errors(
+            data,
+            self.fields,
+            rejected=self.rejected_fields,
+            unknown_reason=self.unknown_field_reason,
+        )
         errors.update(string_array_errors(data, self.fields))
         if errors:
             raise serializers.ValidationError(errors)
@@ -793,3 +843,324 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
             pk=instance.pk
         )
         return PrivateEntityDetailSerializer(loaded, context=self.context).data
+
+
+# --- Private editorial update --------------------------------------------
+
+UPDATE_ENTITY_TYPE_REASON = (
+    "The entity type cannot be changed by an ordinary update: the profile of "
+    "the new type would have to be created and the previous one disposed of. "
+    "A deliberate reclassification operation is required (ADR 0005)."
+)
+UPDATE_STATUS_REASON = (
+    "The editorial status is changed by the submission, review and reopening "
+    "actions, not by an ordinary update."
+)
+UPDATE_OWNER_REASON = (
+    "The owner of a record cannot be changed, not even by an administrator."
+)
+UPDATE_SOURCES_REASON = (
+    "Documentary sources are not written here. Each one is created, updated "
+    "or deleted on `/api/manage/entities/{slug}/sources/`."
+)
+UPDATE_RELATIONS_REASON = (
+    "Relations are not written here. Each one is created, updated or deleted "
+    "on `/api/manage/entities/{slug}/relations/`."
+)
+UNKNOWN_UPDATE_FIELD_REASON = "Unknown input field for this update."
+INCONSISTENT_PROFILE_ERROR = (
+    "This record does not carry exactly the profile of its type. An ordinary "
+    "update does not repair that inconsistency, because doing so would create "
+    "or discard profile data silently; it has to be fixed deliberately."
+)
+
+REJECTED_UPDATE_FIELDS: dict[str, str] = {
+    **REJECTED_ENTITY_FIELDS,
+    "entity_type": UPDATE_ENTITY_TYPE_REASON,
+    "status": UPDATE_STATUS_REASON,
+    "created_by": UPDATE_OWNER_REASON,
+    "created_by_id": UPDATE_OWNER_REASON,
+    "sources": UPDATE_SOURCES_REASON,
+    "relations": UPDATE_RELATIONS_REASON,
+    "relations_from": UPDATE_RELATIONS_REASON,
+    "relations_to": UPDATE_RELATIONS_REASON,
+}
+
+
+def existing_profile(entity: Entity, field_name: str) -> Any | None:
+    """Return the entity's profile row of that name, or `None` when absent.
+
+    A missing reverse one-to-one raises an `AttributeError` subclass, so the
+    three-argument `getattr` is what makes the absence readable.
+    """
+    return getattr(entity, field_name, None)
+
+
+def update_profile(entity: Entity, profile_data: Mapping[str, Any]) -> None:
+    """Apply a partial patch to the existing profile of the entity's type."""
+    if not profile_data:
+        return
+    profile = existing_profile(entity, PROFILE_FIELD_BY_TYPE[entity.entity_type])
+    if profile is None:
+        raise DjangoValidationError(INCONSISTENT_PROFILE_ERROR)
+    for field, value in profile_data.items():
+        setattr(profile, field, value)
+    profile.full_clean()
+    profile.save()
+
+
+class PrivateEntityUpdateSerializer(PrivateEntityCreateSerializer):
+    """Patch the business fields, the existing profile and the attachments.
+
+    Omitted fields keep their value; a supplied list replaces that list, and
+    `[]` empties it. The entity type, the owner, the editorial status, the
+    identifier, the technical dates and the review or deletion marks cannot be
+    supplied, and neither can sources or relations. The profile is patched
+    under the key of the record's current type. Success returns the private
+    detail representation.
+    """
+
+    rejected_fields = REJECTED_UPDATE_FIELDS
+    unknown_field_reason = UNKNOWN_UPDATE_FIELD_REASON
+
+    class Meta(PrivateEntityCreateSerializer.Meta):
+        fields = [
+            name
+            for name in PrivateEntityCreateSerializer.Meta.fields
+            if name != "entity_type"
+        ]
+
+    @property
+    def patched(self) -> Entity:
+        """Return the record being patched, always set on this serializer."""
+        entity = self.instance
+        assert isinstance(entity, Entity)
+        return entity
+
+    def validate_variant_of(self, value: uuid.UUID | None) -> Entity | None:
+        """Refuse a self-reference, on top of the private resolution."""
+        reference = super().validate_variant_of(value)
+        if reference is not None and reference.pk == self.patched.pk:
+            raise serializers.ValidationError(
+                "An entity cannot be a variant of itself."
+            )
+        return reference
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Check the profile against the stored type, then the final state."""
+        self.reject_inconsistent_profile()
+        self.reject_mismatched_profiles(self.patched.entity_type)
+        self.reject_overlapping_attachments(attrs)
+        return attrs
+
+    def reject_inconsistent_profile(self) -> None:
+        """Refuse to patch a record that does not carry exactly one right profile.
+
+        Repairing such a record implicitly would mean creating or dropping
+        profile data as a side effect of an unrelated change.
+        """
+        expected = PROFILE_FIELD_BY_TYPE[self.patched.entity_type]
+        present = [
+            name
+            for name in PROFILE_FIELDS
+            if existing_profile(self.patched, name) is not None
+        ]
+        if present != [expected]:
+            raise serializers.ValidationError(INCONSISTENT_PROFILE_ERROR)
+
+    def reject_overlapping_attachments(self, attrs: Mapping[str, Any]) -> None:
+        """Apply the ADR 0002 rule to the final state, not to the patch alone."""
+        final: dict[str, Any] = {}
+        for primary, secondary in OVERLAPPING_ATTACHMENTS:
+            final[primary] = (
+                attrs[primary] if primary in attrs else getattr(self.patched, primary)
+            )
+            final[secondary] = (
+                attrs[secondary]
+                if secondary in attrs
+                else list(getattr(self.patched, secondary).all())
+            )
+        super().reject_overlapping_attachments(final)
+
+    def update(self, instance: Entity, validated_data: dict[str, Any]) -> Entity:
+        """Patch the record, its profile and its attachments atomically."""
+        profile_data: dict[str, Any] = {}
+        for name in PROFILE_FIELDS:
+            payload = validated_data.pop(name, None)
+            if payload is not None:
+                profile_data = payload
+
+        collections = {
+            name: validated_data.pop(name)
+            for name in ATTACHED_COLLECTIONS
+            if name in validated_data
+        }
+
+        roles, caller_id = caller_policy(self.context)
+        try:
+            with transaction.atomic():
+                # Le droit est réévalué sur la ligne verrouillée : sans cela une
+                # transition concurrente pourrait être écrasée par ce PATCH.
+                entity = Entity.objects.select_for_update().get(pk=instance.pk)
+                if not is_privately_editable(entity, roles=roles, caller_id=caller_id):
+                    raise PermissionDenied(NOT_EDITABLE_MESSAGE)
+                # Les rattachements ont pu changer depuis la validation initiale.
+                self.instance = entity
+                self.reject_overlapping_attachments({**validated_data, **collections})
+                for field, value in validated_data.items():
+                    setattr(entity, field, value)
+                entity.full_clean()
+                entity.save()
+                update_profile(entity, profile_data)
+                attach_collections(entity, collections)
+        except DjangoValidationError as error:
+            # Seule `ValidationError` est convertie, comme à la création.
+            raise serializers.ValidationError(
+                serializers.as_serializer_error(error)
+            ) from error
+        return entity
+
+
+# --- Private editorial writes on a record's children --------------------
+#
+# Une source et une relation appartiennent à une fiche : leur parent vient de
+# l'URL, jamais du corps. Les validations restent celles des modèles, appelées
+# par `save_validated()`.
+
+CHILD_IDENTIFIER_REASON = (
+    "The identifier is generated by the server; it cannot be supplied."
+)
+CHILD_PARENT_REASON = (
+    "The record this belongs to comes from the URL; it cannot be supplied, "
+    "and an existing row is never moved to another record."
+)
+TARGET_IDENTIFIER_REASON = "Name the target figure under `to_entity`, with its UUID."
+UNKNOWN_SOURCE_FIELD_REASON = "Unknown input field for a documentary source."
+UNKNOWN_RELATION_FIELD_REASON = "Unknown input field for a relation."
+UNREADABLE_TARGET_MESSAGE = (
+    "No target figure readable by this account matches this identifier."
+)
+
+REJECTED_SOURCE_FIELDS: dict[str, str] = {
+    "id": CHILD_IDENTIFIER_REASON,
+    "pk": CHILD_IDENTIFIER_REASON,
+    "entity": CHILD_PARENT_REASON,
+    "entity_id": CHILD_PARENT_REASON,
+}
+
+REJECTED_RELATION_FIELDS: dict[str, str] = {
+    "id": CHILD_IDENTIFIER_REASON,
+    "pk": CHILD_IDENTIFIER_REASON,
+    "entity": CHILD_PARENT_REASON,
+    "entity_id": CHILD_PARENT_REASON,
+    "from_entity": CHILD_PARENT_REASON,
+    "from_entity_id": CHILD_PARENT_REASON,
+    "to_entity_id": TARGET_IDENTIFIER_REASON,
+}
+
+
+class SourceWriteSerializer(serializers.ModelSerializer[Source]):
+    """Input for one documentary source of a record.
+
+    `label` and `kind` are required on creation. A patch changes only the keys
+    it carries, and `accessed_at` is the only one that accepts `null`. The
+    record this source belongs to comes from the URL.
+    """
+
+    class Meta:
+        model = Source
+        fields = ["label", "kind", "url", "accessed_at", "notes"]
+
+    def to_internal_value(self, data: Any) -> Any:
+        """Refuse the identifier, the parent and any unknown key first."""
+        if isinstance(data, Mapping):
+            errors = rejected_key_errors(
+                data,
+                self.fields,
+                rejected=REJECTED_SOURCE_FIELDS,
+                unknown_reason=UNKNOWN_SOURCE_FIELD_REASON,
+            )
+            if errors:
+                raise serializers.ValidationError(errors)
+        return super().to_internal_value(data)
+
+    def create(self, validated_data: dict[str, Any]) -> Source:
+        """Create the source on the record supplied by the view."""
+        source = Source(**validated_data)
+        save_validated(source)
+        return source
+
+    def update(self, instance: Source, validated_data: dict[str, Any]) -> Source:
+        return patched_and_saved(instance, validated_data)
+
+
+class RelationWriteSerializer(serializers.ModelSerializer[EntityRelation]):
+    """Input for one outgoing relation of a record.
+
+    `kind` is required on creation, together with exactly one target: either
+    `to_entity`, the UUID of a figure this account may read, or `to_name`, a
+    non-blank name for a figure that has no record. The same rule applies to
+    the state a patch leaves behind, so resolving a cited name means sending
+    `to_entity` **and** an empty `to_name` in one request. An omitted key keeps
+    its value, and no name is ever resolved automatically.
+
+    `kind` qualifies the target, read from this record: `parent` means "the
+    target is a parent of this entity". No inverse relation is created.
+    """
+
+    # Résolution par UUID parmi les seules fiches lisibles par l'appelant, avec
+    # le même refus pour une cible inconnue, supprimée ou interdite.
+    to_entity = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Identifier of the target figure, or `null` for a target cited by "
+            "name only. Only a figure readable by the calling account can be "
+            "selected; anything else is refused identically, whether it is "
+            "unreadable, deleted or unknown."
+        ),
+    )
+
+    class Meta:
+        model = EntityRelation
+        fields = ["kind", "to_entity", "to_name", "notes"]
+
+    def to_internal_value(self, data: Any) -> Any:
+        """Refuse the identifier, the source record and any unknown key first."""
+        if isinstance(data, Mapping):
+            errors = rejected_key_errors(
+                data,
+                self.fields,
+                rejected=REJECTED_RELATION_FIELDS,
+                unknown_reason=UNKNOWN_RELATION_FIELD_REASON,
+            )
+            if errors:
+                raise serializers.ValidationError(errors)
+        return super().to_internal_value(data)
+
+    def validate_to_entity(self, value: uuid.UUID | None) -> Entity | None:
+        """Resolve a target this caller may read, without disclosing the others.
+
+        Readable is enough: linking to a figure does not require the right to
+        modify it.
+        """
+        if value is None:
+            return None
+        roles, caller_id = caller_policy(self.context)
+        target = (
+            private_entities(roles=roles, caller_id=caller_id).filter(pk=value).first()
+        )
+        if target is None:
+            raise serializers.ValidationError(UNREADABLE_TARGET_MESSAGE)
+        return target
+
+    def create(self, validated_data: dict[str, Any]) -> EntityRelation:
+        """Create the relation from the record supplied by the view."""
+        relation = EntityRelation(**validated_data)
+        save_validated(relation)
+        return relation
+
+    def update(
+        self, instance: EntityRelation, validated_data: dict[str, Any]
+    ) -> EntityRelation:
+        return patched_and_saved(instance, validated_data)

@@ -492,9 +492,11 @@ PRIVATE_DETAIL_DESCRIPTION = (
     "references for the same record, which is the intended behaviour.\n\n"
     "The collection's query parameters do not apply here, and cannot change "
     "which records this account may read.\n\n"
-    "Write methods are refused on this URL with `405 Method Not Allowed`, for "
-    "every role: creation is a `POST` on the collection, and updating, status "
-    "transitions and deletion are not available yet."
+    "`PATCH` updates this record; see that operation. Its documentary sources "
+    "and relations are written one by one under `sources/` and `relations/`. "
+    "`PUT` and `DELETE` are refused with `405 Method Not Allowed`, for every "
+    "role, and creation is a `POST` on the collection. Status transitions and "
+    "the deletion of an entity are not available yet."
 )
 
 PRIVATE_LIST_EXAMPLE = OpenApiExample(
@@ -573,10 +575,10 @@ PRIVATE_CREATE_DESCRIPTION = (
     "privately. An unreadable record, a deleted record and an unknown "
     "identifier are all refused with the same message, which never confirms "
     "that a record exists.\n\n"
-    "**Not available yet.** `sources` and `relations` cannot be created "
-    "together with an entity; sending either returns `400` rather than "
-    "ignoring it. Any other unrecognised key is refused too, so a misspelt "
-    "field name cannot pass unnoticed.\n\n"
+    "**Children are written separately.** `sources` and `relations` cannot be "
+    "created together with an entity; sending either returns `400` pointing at "
+    "the dedicated routes, rather than ignoring it. Any other unrecognised key "
+    "is refused too, so a misspelt field name cannot pass unnoticed.\n\n"
     "**All or nothing.** The entity, its profile and its attachments are "
     "written in a single transaction. An invalid request returns `400` and "
     "creates nothing — never an entity without its profile, nor a record with "
@@ -696,13 +698,395 @@ PRIVATE_CREATE_INVALID_RESPONSE = OpenApiResponse(
             },
         ),
         OpenApiExample(
-            "DeferredNestedCollection",
+            "ChildWrittenOnItsOwnRoute",
             response_only=True,
             value={
                 "sources": [
-                    "Creating documentary sources together with an entity is "
-                    "not available yet. Create the entity first; attaching "
-                    "sources comes with a later increment."
+                    "Documentary sources are not created together with an "
+                    "entity. Create the entity first, then post each source "
+                    "to `/api/manage/entities/{slug}/sources/`."
+                ]
+            },
+        ),
+    ],
+)
+
+
+# --- Private editorial update -------------------------------------------
+
+PRIVATE_UPDATE_DESCRIPTION = (
+    "Updates the business fields, the existing profile and the reference "
+    "attachments of one record. Requires an access token and an editorial "
+    "role.\n\n"
+    "**Who may update what.** A contributor updates its own `draft` and "
+    "`rejected` records. A reviewer updates any `draft`, `rejected` or "
+    "`submitted` record. An administrator and an active superuser update every "
+    "record that has not been deleted. Reading a record does not imply "
+    "updating it: a record this account may read but not modify returns "
+    "`403`, while an unknown slug, an unreadable record and a deleted record "
+    "all return the same `404`.\n\n"
+    "**Partial by nature.** An omitted field keeps its value. A supplied list "
+    "replaces that list entirely, and `[]` empties it; `null` is accepted only "
+    "on fields that are nullable. Omitted collections are left intact.\n\n"
+    "**The entity type cannot change.** Supplying `entity_type` returns `400`: "
+    "moving a figure to another type means creating the profile of the new "
+    "type and deciding what becomes of the previous one, which a reclassifying "
+    "operation will handle deliberately. The identifier never changes; the "
+    "`slug` may, and keeps its uniqueness.\n\n"
+    "**The profile is patched under the key of the current type.** Only the "
+    "supplied profile fields change; an omitted or empty profile erases "
+    "nothing. A profile sent as `null`, a profile key of another type, and a "
+    "profile naming an entity or an identifier are refused. A record that does "
+    "not already carry exactly the profile of its type is refused with `400` "
+    "and left untouched: an ordinary update does not repair that inconsistency "
+    "silently.\n\n"
+    "**The server still decides the rest.** The owner, the editorial status, "
+    "the identifier, the technical timestamps and the review or deletion marks "
+    "cannot be supplied — no ownership transfer, not even for an "
+    "administrator. Documentary sources and relations are not written here "
+    "either: each one has its own route under this record. Any unrecognised "
+    "key is refused too.\n\n"
+    "**Attachments use existing identifiers**, and no reference record is ever "
+    "created. The rule keeping a primary anchor distinct from the secondary "
+    "attachments of the same dimension is checked on the **final state**, "
+    "combining the stored values with this request. `variant_of` still accepts "
+    "only a figure readable by this account, refuses a self-reference, and "
+    "reports an unreadable, deleted or unknown target identically.\n\n"
+    "**All or nothing.** The record, its profile and its attachments are "
+    "written in a single transaction, and the update right is re-evaluated on "
+    "the locked row, so a concurrent status change cannot be overwritten. A "
+    "refused request changes nothing at all.\n\n"
+    "**Response.** `200` with the private detail representation of the updated "
+    "record."
+)
+
+PRIVATE_UPDATE_REQUEST_EXAMPLE = OpenApiExample(
+    "Partial update of a hero (synthetic)",
+    description=(
+        "Invented values, shown to illustrate the request shape. Only the keys "
+        "present are changed: the other business fields, the other profile "
+        "fields and the omitted collections keep their stored values. No "
+        "`entity_type`, owner, status or date appears — none of them can be "
+        "supplied."
+    ),
+    request_only=True,
+    value={
+        "category": "Revised synthetic subtitle",
+        "characteristics": ["Revised synthetic trait"],
+        "domains": [1, 2],
+        "hero_profile": {"titles": ["Revised synthetic title"]},
+    },
+)
+
+PRIVATE_NOT_EDITABLE_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "Either the token is valid but its account holds no editorial role, or "
+        "the account may read this record and not modify it — a contributor "
+        "facing a published record, or a record owned by someone else, for "
+        "instance. The body distinguishes the two cases."
+    ),
+    examples=[
+        OpenApiExample(
+            "RecordNotEditableByThisAccount",
+            response_only=True,
+            value={
+                "detail": (
+                    "This account may read this record but not modify it. A "
+                    "contributor modifies its own draft and rejected records; "
+                    "a reviewer also modifies submitted records; every other "
+                    "case requires an administrator."
+                )
+            },
+        )
+    ],
+)
+
+PRIVATE_UPDATE_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "The request was refused and **nothing was changed**. One key per "
+        "field at fault, each carrying its messages. A refused key is always "
+        "named, never ignored."
+    ),
+    examples=[
+        OpenApiExample(
+            "EntityTypeCannotChange",
+            response_only=True,
+            value={
+                "entity_type": [
+                    "The entity type cannot be changed by an ordinary update: "
+                    "the profile of the new type would have to be created and "
+                    "the previous one disposed of. A deliberate "
+                    "reclassification operation is required (ADR 0005)."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "StatusIsNotUpdatedHere",
+            response_only=True,
+            value={
+                "status": [
+                    "The editorial status is changed by the submission, review "
+                    "and reopening actions, not by an ordinary update."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "OverlappingAttachmentInTheFinalState",
+            response_only=True,
+            value={
+                "secondary_countries": [
+                    "'Example Country' is already this entity's "
+                    "primary_country; a value cannot be both a primary anchor "
+                    "and a secondary attachment."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "SelfReference",
+            response_only=True,
+            value={"variant_of": ["An entity cannot be a variant of itself."]},
+        ),
+    ],
+)
+
+
+# --- Private editorial writes on a record's children --------------------
+#
+# Six opérations, deux enfants, un seul contrat de sécurité : celui de la
+# fiche porteuse. Les textes communs sont donc assemblés une fois.
+
+CHILD_RIGHTS = (
+    "Requires an access token and an editorial role, and the right to "
+    "**update the record named by the slug**: a contributor writes on its own "
+    "`draft` and `rejected` records, a reviewer on any `draft`, `rejected` or "
+    "`submitted` record, an administrator on every record that has not been "
+    "deleted. A record this account may read but not update returns `403`; an "
+    "unknown slug, an unreadable record and a deleted record all return the "
+    "same `404`.\n\n"
+    "The record itself is never touched: its status, owner, type, profile, "
+    "review marks and `updated_at` are left exactly as they were.\n\n"
+)
+
+CHILD_LOOKUP = (
+    "The row is looked up **inside that record**, never by its identifier "
+    "alone: an identifier that does not exist, or belongs to another record, "
+    "returns the same `404`. Nothing is ever moved from one record to "
+    "another.\n\n"
+)
+
+SOURCE_ID_PARAMETER = OpenApiParameter(
+    name="source_id",
+    type=int,
+    location=OpenApiParameter.PATH,
+    required=True,
+    description=(
+        "Identifier of the documentary source, as returned in the `sources` "
+        "array of the private detail."
+    ),
+)
+
+RELATION_ID_PARAMETER = OpenApiParameter(
+    name="relation_id",
+    type=int,
+    location=OpenApiParameter.PATH,
+    required=True,
+    description=(
+        "Identifier of the relation, as returned in the `relations` array of "
+        "the private detail."
+    ),
+)
+
+SOURCE_CREATE_DESCRIPTION = (
+    "Adds one documentary source to the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + "**Input.** `label` and `kind` are required; `url`, `accessed_at` and "
+    "`notes` are optional. `url` may be an empty string — a book or an oral "
+    "testimony has none — and is only checked for format, never fetched. "
+    "`accessed_at` is a consultation date, not a publication date. The "
+    "identifier and the owning record cannot be supplied, and any "
+    "unrecognised key is refused.\n\n"
+    "**No uniqueness is enforced.** Two sources carrying the same label or "
+    "URL are legitimate on the same record; discarding duplicates is "
+    "editorial work, not a structural rule.\n\n"
+    "**Response.** `201` with the created source. Read them back in the "
+    "`sources` array of the private detail: there is no separate list route."
+)
+
+SOURCE_UPDATE_DESCRIPTION = (
+    "Updates one documentary source of the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + CHILD_LOOKUP
+    + "**Partial by nature.** An omitted key keeps its value. `accessed_at` is "
+    "the only key that accepts `null`; `url` and `notes` accept an empty "
+    "string, `label` and `kind` do not. The identifier and the owning record "
+    "cannot be supplied, and any unrecognised key is refused.\n\n"
+    "**Response.** `200` with the updated source. A refused request returns "
+    "`400` and changes nothing."
+)
+
+SOURCE_DELETE_DESCRIPTION = (
+    "Deletes one documentary source of the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + CHILD_LOOKUP
+    + "Only that source row is removed. The record, its profile and every "
+    "other source are untouched, and no entity is ever deleted here. The "
+    "removal is immediate and final: there is no recycle bin for a source and "
+    "no history of the deletion.\n\n"
+    "**Response.** `204` with no body."
+)
+
+RELATION_CREATE_DESCRIPTION = (
+    "Adds one outgoing relation to the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + "**Input.** `kind` is required, together with **exactly one** target: "
+    "`to_entity`, the UUID of a figure this account may read, or `to_name`, a "
+    "non-blank name for a figure that has no record. Supplying both or "
+    "neither returns `400`. `notes` is optional.\n\n"
+    "**Reading the target is enough** to link to it; updating it is not "
+    "required. An unreadable, deleted or unknown UUID is refused with the "
+    "same message, which never confirms that a record exists, and never "
+    "discloses its name, identifier or editorial status. A relation from a "
+    "record to itself is refused.\n\n"
+    "**Direction.** `kind` qualifies the target, read from this record: "
+    "`parent` means that the target is a parent of this entity. No inverse or "
+    "reciprocal relation is created, and no cycle is detected. A name is "
+    "never resolved to a record automatically.\n\n"
+    "**Uniqueness.** The same triple — this record, this target, this kind — "
+    "cannot be recorded twice, whether the target is resolved or cited by "
+    "name. A pair of figures may still carry several kinds of relation.\n\n"
+    "**Response.** `201` with the created relation. Read them back in the "
+    "`relations` array of the private detail: there is no separate list route."
+)
+
+RELATION_UPDATE_DESCRIPTION = (
+    "Updates one outgoing relation of the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + CHILD_LOOKUP
+    + "A relation whose resolved target is not readable by this account stays "
+    "unreachable here too, with the same `404`, even when its identifier is "
+    "guessed.\n\n"
+    "**Partial by nature, with one rule on the final state.** An omitted key "
+    "keeps its value, and neither target form is cleared implicitly. Whatever "
+    "the request, the row left behind must still carry exactly one target. "
+    "Resolving a cited name therefore means sending both keys in one "
+    "request — `to_entity` with the UUID and `to_name` as an empty string — "
+    "and un-resolving a target means sending `to_entity: null` together with "
+    "a non-blank `to_name`.\n\n"
+    "The target rules of the creation apply unchanged, and the uniqueness of "
+    "the triple is checked excluding this relation itself.\n\n"
+    "**Response.** `200` with the updated relation. A refused request returns "
+    "`400` and changes nothing."
+)
+
+RELATION_DELETE_DESCRIPTION = (
+    "Deletes one outgoing relation of the record named by the slug.\n\n"
+    + CHILD_RIGHTS
+    + CHILD_LOOKUP
+    + "Only that relation row is removed. Neither the record nor the target "
+    "figure is affected — deleting a link never deletes a figure — and no "
+    "entity is ever deleted here. The removal is immediate and final.\n\n"
+    "**Response.** `204` with no body."
+)
+
+SOURCE_REQUEST_EXAMPLE = OpenApiExample(
+    "Documentary source (synthetic)",
+    description=(
+        "Invented reference, shown to illustrate the request shape. On a "
+        "patch, send only the keys to change."
+    ),
+    request_only=True,
+    value={
+        "label": "Synthetic Reference Work",
+        "kind": "book",
+        "url": "",
+        "accessed_at": None,
+        "notes": "Invented reference, for documentation only.",
+    },
+)
+
+RELATION_REQUEST_EXAMPLE = OpenApiExample(
+    "Relation to a cited figure (synthetic)",
+    description=(
+        "Invented link, shown to illustrate the request shape. Here the target "
+        "has no record, so it is cited by name and `to_entity` stays `null`. "
+        "On a patch, send only the keys to change — plus the other target key "
+        "when switching between the two forms."
+    ),
+    request_only=True,
+    value={
+        "kind": "parent",
+        "to_entity": None,
+        "to_name": "Figure Without A Record",
+        "notes": "",
+    },
+)
+
+CHILD_NOT_FOUND_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "Nothing was found to write on. The same response is returned whether "
+        "the slug does not exist, refers to a record this account may not "
+        "read, or refers to a deleted record, and whether the child identifier "
+        "does not exist, belongs to another record, or — for a relation — "
+        "points at a target this account may not read. The body never reveals "
+        "which."
+    ),
+    examples=[
+        OpenApiExample(
+            "UnknownOrUnreachableRow",
+            response_only=True,
+            value={"detail": "No Source matches the given query."},
+        )
+    ],
+)
+
+CHILD_INVALID_RESPONSE = OpenApiResponse(
+    response={
+        "type": "object",
+        "additionalProperties": {"type": "array", "items": {"type": "string"}},
+    },
+    description=(
+        "The request was refused and **nothing was changed**. One key per "
+        "field at fault, each carrying its messages; a model-level rule, such "
+        "as the one-target rule of a relation or a uniqueness violation, "
+        "appears under `non_field_errors` or under the field it names. A "
+        "refused key is always named, never ignored."
+    ),
+    examples=[
+        OpenApiExample(
+            "NoTarget",
+            response_only=True,
+            value={"to_name": ["Provide either a target entity or a target name."]},
+        ),
+        OpenApiExample(
+            "TwoTargets",
+            response_only=True,
+            value={
+                "to_name": [
+                    "Leave the target name empty when a target entity is selected."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "UnreadableTarget",
+            response_only=True,
+            value={
+                "to_entity": [
+                    "No target figure readable by this account matches this "
+                    "identifier."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "ParentComesFromTheUrl",
+            response_only=True,
+            value={
+                "entity": [
+                    "The record this belongs to comes from the URL; it cannot "
+                    "be supplied, and an existing row is never moved to "
+                    "another record."
                 ]
             },
         ),

@@ -80,8 +80,8 @@ drafts, the collection answers `200` with zero results and any detail slug
 answers `404` — see the visibility rule below. No write method is offered on
 the public entity routes, because none exists.
 
-**Authenticating in Swagger UI.** `GET /api/auth/me/` and the three
-`/api/manage/entities/` operations require a token; everything else is open.
+**Authenticating in Swagger UI.** `GET /api/auth/me/` and every
+`/api/manage/` operation require a token; everything else is open.
 Run `POST /api/auth/token/` first, copy the `access` value from the response,
 press **Authorize**, paste it, then execute the protected operation. Paste the
 token alone: Swagger adds the `Bearer ` prefix itself. The public operations
@@ -104,8 +104,9 @@ The corpus is served by two distinct pairs of routes, and they never mix.
 | `/api/entities/…` | anyone, no token | published, non-deleted records only |
 | `/api/manage/entities/…` | access token **and** an editorial role | the editorial view of the corpus, by role and ownership |
 
-The private collection is also where a record is created; the public routes
-carry no write operation at all.
+The private routes are also where a record, its profile, its attachments, its
+documentary sources and its relations are written; the public routes carry no
+write operation at all.
 
 The public routes behave identically for every caller. A reviewer's or a
 superuser's token changes neither their selection nor their payload: the
@@ -246,7 +247,7 @@ Creating a record happens on the private collection described below.
 
 ## Private editorial API
 
-Three endpoints for editorial work. They require an access token **and**
+Ten endpoints for editorial work. They require an access token **and**
 membership of one of three editorial groups.
 
 | Endpoint | Returns |
@@ -254,24 +255,32 @@ membership of one of three editorial groups.
 | `GET /api/manage/entities/` | paginated collection: the five public compact fields, plus `status` and `created_by` |
 | `GET /api/manage/entities/{slug}/` | full entity: every public business field, plus `status`, `created_by`, `submitted_at`, `reviewed_at`, `reviewed_by` and `review_notes` |
 | `POST /api/manage/entities/` | creates one entity and the profile of its type, as a draft owned by the caller; answers `201` with the private detail payload |
+| `PATCH /api/manage/entities/{slug}/` | updates the business fields, the existing profile and the attachments; answers `200` with the private detail payload |
+| six routes under `{slug}/sources/` and `{slug}/relations/` | create, update and delete the record's documentary sources and relations, one row at a time — see below |
 
 ```bash
 curl http://127.0.0.1:8000/api/manage/entities/ \
   -H "Authorization: Bearer <access token>"
 ```
 
-### Roles and what they read
+### Roles, and what they may read, create and update
 
 Roles are three Django groups — `contributor`, `reviewer` and
 `administrator` — created by a data migration. There is no `role` field on the
 account.
 
-| Caller | Reads on these routes | May create |
-|---|---|---|
-| anonymous, or an unusable token | `401` | no |
-| authenticated, no editorial role | `403`, even for a published record | no |
-| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes |
-| reviewer, administrator, superuser | every record that has not been deleted | yes |
+| Caller | Reads on these routes | Creates | Updates |
+|---|---|---|---|
+| anonymous, or an unusable token | `401` | no | no |
+| authenticated, no editorial role | `403`, even for a published record | no | no |
+| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes | its own `draft` and `rejected` |
+| reviewer | every record that has not been deleted | yes | every `draft`, `rejected` and `submitted` |
+| administrator, superuser | every record that has not been deleted | yes | every record that has not been deleted |
+
+**Reading does not imply updating.** A contributor reads a published record
+but does not modify it; so does a reviewer. A record this account may read and
+not modify returns `403`, while an unknown slug, an unreadable record and a
+deleted record all return the same `404`.
 
 - **Signing in grants nothing.** An account with no editorial group is
   refused. Reading published content is what the public routes are for.
@@ -388,13 +397,135 @@ attachments.
 A new record is readable at once on the private endpoints by its owner, and
 absent from the public API until it is published.
 
+### Update an entity, its profile and its attachments
+
+`PATCH /api/manage/entities/{slug}/` updates one record. Who may update what is
+in the table above.
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/manage/entities/example-created-hero/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"category": "Revised subtitle", "hero_profile": {"titles": ["Revised title"]}}'
+```
+
+**Partial by nature.** An omitted field keeps its value. A supplied list
+replaces that list entirely, and `[]` empties it. `null` is accepted only on
+fields that are nullable — the three primary anchors and `variant_of`. Omitted
+collections are left intact.
+
+**The entity type cannot change.** Supplying `entity_type` returns `400`:
+moving a figure to another type means creating the profile of the new type and
+deciding what becomes of the previous one, which a deliberate reclassifying
+operation will handle (ADR 0005). The `id` never changes; the `slug` may, and
+keeps its uniqueness.
+
+**The profile is patched under the key of the current type.** Only the supplied
+profile fields change; an omitted or empty profile erases nothing. A profile
+sent as `null`, a profile key of another type, and a profile naming an `entity`
+or an identifier are refused. A record that does not already carry exactly the
+profile of its type is refused with `400` and left untouched: an ordinary
+update never repairs that inconsistency silently.
+
+**The server still decides the rest.** The owner, the editorial status, the
+identifier, the technical timestamps and the review or deletion marks cannot be
+supplied — no ownership transfer, not even for an administrator — and
+documentary sources and relations cannot be written here yet. Any unrecognised
+key is refused too.
+
+**Attachments use existing identifiers**, and no reference record is created.
+The rule keeping a primary anchor distinct from the secondary attachments of
+the same dimension is checked on the **final state**, combining the stored
+values with the request: swapping an anchor and a secondary value in one
+request is therefore accepted. `variant_of` still accepts only a figure this
+account may read, refuses a self-reference, and reports an unreadable, deleted
+or unknown target identically.
+
+**All or nothing.** The record, its profile and its attachments are written in
+a single transaction, and the update right is re-evaluated on the locked row,
+so a concurrent status change cannot be overwritten. A refused request changes
+nothing at all.
+
+| Situation | Response |
+|---|---|
+| Updated | `200` with the private detail payload |
+| Invalid field, duplicate name or slug, unknown reference, overlapping attachment | `400`, one key per field at fault |
+| `entity_type`, a server-controlled field, `sources`, `relations` or an unknown key supplied | `400` naming that field |
+| No token, or an unusable one | `401` |
+| No editorial role, or a record this account may read but not modify | `403` |
+| Unknown slug, unreadable record, or deleted record | `404`, with the same body in all three cases |
+
+### Write the documentary sources and relations of a record
+
+`sources` and `relations` are **not** written through the entity payload: each
+row has its own route under the record. Sending either key to `POST` or `PATCH`
+on an entity returns `400` pointing here.
+
+| Method and route | Does |
+|---|---|
+| `POST /api/manage/entities/{slug}/sources/` | adds one source; `201` with the created source |
+| `PATCH /api/manage/entities/{slug}/sources/{source_id}/` | updates one source; `200` |
+| `DELETE /api/manage/entities/{slug}/sources/{source_id}/` | removes one source; `204`, no body |
+| `POST /api/manage/entities/{slug}/relations/` | adds one outgoing relation; `201` |
+| `PATCH /api/manage/entities/{slug}/relations/{relation_id}/` | updates one relation; `200` |
+| `DELETE /api/manage/entities/{slug}/relations/{relation_id}/` | removes one relation; `204`, no body |
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/relations/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"kind": "parent", "to_name": "Figure Without A Record"}'
+```
+
+**Rights are the record's own update rights** — the table above — and nothing
+else. A record this account may read but not update returns `403`. The
+identifiers are the integers already shown in the `sources` and `relations`
+arrays of the private detail, and a row is always looked up **inside** the
+record named by the slug: an identifier that does not exist, or belongs to
+another record, returns the same `404`. Nothing is ever moved from one record
+to another.
+
+**Reading stays in the private detail.** There is no list route and no
+pagination for the children; `GET` on these URLs is refused with `405`.
+
+**The record itself is never touched.** Its status, owner, type, profile,
+review marks and `updated_at` are left exactly as they were — writing a child
+is content editing, not an entity write.
+
+**A source** takes `label` and `kind` (required on creation), plus `url`,
+`accessed_at` and `notes`. `url` may be empty — a book or an oral testimony has
+none — and is only checked for format, never fetched. `accessed_at` is a
+consultation date and the only key accepting `null`. No uniqueness is enforced:
+two sources with the same label or URL on one record are legitimate.
+
+**A relation** takes `kind` and **exactly one** target: `to_entity`, the UUID of
+a figure this account may read, or `to_name`, a non-blank name for a figure that
+has no record. Supplying both or neither returns `400`. Reading the target is
+enough; updating it is not required. An unreadable, deleted or unknown UUID is
+refused with the same message, which never discloses the target's name,
+identifier or status, and a relation from a record to itself is refused. The
+same triple — record, target, kind — cannot be recorded twice, though a pair of
+figures may carry several kinds.
+
+A patch keeps every omitted key and clears neither target form implicitly, so
+resolving a cited name takes both keys in one request:
+`{"to_entity": "<uuid>", "to_name": ""}`; un-resolving takes
+`{"to_entity": null, "to_name": "Some Name"}`. No name is ever resolved
+automatically. `kind` keeps its direction — `parent` means the target is a
+parent of this record — and no inverse, reciprocal or cycle check is added.
+
+**A deletion removes only that row.** No entity, profile or target figure is
+ever deleted here, and there is no recycle bin or history for a child. A
+relation towards a target this account may not read stays unreachable, with the
+same `404`, even if its identifier is guessed.
+
 ### The other writes are still refused
 
-`PUT`, `PATCH` and `DELETE` are refused with `405` on both private URLs, for
-every role, superuser included, and `POST` is refused on the private detail
-URL. Updating, the editorial transitions — submission, publication, rejection,
-reopening — and logical deletion or restoration belong to later increments, and
-so does attaching documentary sources and relations.
+`PUT` and `DELETE` are refused with `405` on both private entity URLs, for every
+role, superuser included, and `POST` is refused on the private detail URL. Full
+replacement, the editorial transitions — submission, publication, rejection,
+reopening — and the logical deletion or restoration of an entity belong to later
+increments.
 
 ## Authentication
 
@@ -425,8 +556,10 @@ curl -X POST http://127.0.0.1:8000/api/auth/token/ \
 }
 ```
 
-- **`access`** lives 5 minutes and is sent on every request that needs
-  authentication.
+- **`access`** lives 5 minutes outside development and is sent on every request
+  that needs authentication. With `DJANGO_DEBUG=True`, its lifetime defaults
+  to 20 minutes for exercises, configurable through `JWT_DEV_ACCESS_MINUTES`.
+  This override is ignored when debug is disabled.
 - **`refresh`** lives 1 day and is sent **only** to the refresh endpoint.
 
 The two are not interchangeable: a refresh token is refused as an access
@@ -482,8 +615,10 @@ exactly what a stranger sees. Access to the private editorial routes requires
 a Django group on top of the token, checked server-side on every request — and
 an account with a token but no group is refused with `403`.
 
-The only write operation is the private creation described above. It never
-lets a client choose the owner or the editorial status, whatever its role.
+Every write is private, and none lets a client choose the owner or the
+editorial status, whatever its role. The right to write on one record — its own
+fields or one of its children — is checked on that record, not only on the
+route.
 
 ### Caveats
 
@@ -492,7 +627,8 @@ lets a client choose the owner or the editorial status, whatever its role.
   until it expires on its own, and discarding a token in your client does not
   cancel it server-side. There is no logout endpoint, and none is implied. A
   compromised token therefore stays valid for up to its lifetime — 5 minutes
-  for an access token, 1 day for a refresh token.
+  for an access token (20 minutes by default in development), 1 day for a
+  refresh token.
 - **Use HTTPS outside localhost.** Tokens are bearer credentials: anyone
   holding one is the account until it expires. Over plain HTTP they travel in
   clear text and can be captured and replayed. The same applies to the
@@ -586,10 +722,13 @@ the protected identity route, validated with manual Postman exercises.
 Increment 2 adds the three editorial groups, created by a data migration, and
 the private read endpoints described above: role and ownership select the
 records, and nested references follow the caller's own rule. Increment 3 opens
-one write operation — the private creation of an entity and its profile, as a
-draft owned by the caller.
+the private creation of an entity and its profile, as a draft owned by the
+caller. Increment 4A adds the private partial update of the business fields,
+the existing profile and the reference attachments, by role, ownership and
+status. Increment 4B adds the write routes of a record's documentary sources
+and relations, one row at a time, under the same rights.
 
-The public routes stay read-only, and so does the private detail URL. Updating,
-the editorial transitions (submission, publication, rejection, reopening),
-logical deletion and restoration, and the nested creation of documentary
-sources and relations are not implemented yet.
+The public routes stay read-only. Full replacement and deletion of entities stay refused,
+and the editorial transitions (submission, publication, rejection, reopening),
+logical deletion and restoration, and the reclassification of an entity's type
+are not implemented yet.

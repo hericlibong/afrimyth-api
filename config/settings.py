@@ -172,7 +172,9 @@ REST_FRAMEWORK = {
 # `SECRET_KEY`. Aucun secret supplémentaire, aucun rôle métier dans les
 # claims — les autorisations viendront des groupes Django, pas du jeton.
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(env("JWT_DEV_ACCESS_MINUTES", "20")) if DEBUG else 5
+    ),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
@@ -238,16 +240,27 @@ SPECTACULAR_SETTINGS = {
         "either, and sending one of them is refused rather than ignored. A new "
         "record is therefore readable at once on the private endpoints by its "
         "owner, and absent from the public API until it is published.\n\n"
+        "## Private editorial update\n\n"
+        "`PATCH /api/manage/entities/{slug}/` updates the business fields, the "
+        "existing profile and the reference attachments of one record, in a "
+        "single transaction. It is partial: an omitted field keeps its value. "
+        "The entity type cannot change, and neither can the owner, the "
+        "editorial status, the identifier, the technical dates or the review "
+        "and deletion marks. A contributor updates its own `draft` and "
+        "`rejected` records, a reviewer any `draft`, `rejected` or "
+        "`submitted` record, an administrator every record that has not been "
+        "deleted — so a readable record is not necessarily a modifiable one, "
+        "and that case answers `403`.\n\n"
         "## What can be written, and what cannot\n\n"
         "The public endpoints stay read-only: on `/api/entities/`, only `GET` "
         "is available, and every write method is refused with "
-        "`405 Method Not Allowed`. On `/api/manage/entities/`, creation is "
-        "available as described above, while `PUT`, `PATCH` and `DELETE` are "
-        "refused with `405` for every role: updating, the moderation workflow "
-        "— submission, publication, rejection, reopening — and logical "
-        "deletion are planned for later increments and are **not** part of "
-        "this contract. Nested creation of documentary sources and relations "
-        "is deferred with them.\n\n"
+        "`405 Method Not Allowed`. On `/api/manage/entities/`, creation and "
+        "the partial update are available as described above, while `PUT` and "
+        "`DELETE` are refused with `405` for every role: full replacement, the "
+        "moderation workflow — submission, publication, rejection, reopening — "
+        "and logical deletion are planned for later increments and are "
+        "**not** part of this contract. Writing documentary sources and "
+        "relations is deferred with them.\n\n"
         "The `/api/auth/` endpoints also use `POST`, because they carry "
         "credentials in the request body; they create no content.\n\n"
         "## Authentication\n\n"

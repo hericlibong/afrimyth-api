@@ -285,6 +285,42 @@ def private_entity_detail(
     )
 
 
+#: Statuts qu'un rôle peut modifier par une écriture ordinaire. Un
+#: administrateur n'est pas listé : il modifie tous les statuts non supprimés.
+#: Les statuts sont énumérés plutôt que déduits, pour la même raison que
+#: `OWNED_PRIVATE_STATUSES`.
+CONTRIBUTOR_EDITABLE_STATUSES = (EntityStatus.DRAFT, EntityStatus.REJECTED)
+REVIEWER_EDITABLE_STATUSES = (
+    EntityStatus.DRAFT,
+    EntityStatus.REJECTED,
+    EntityStatus.SUBMITTED,
+)
+
+
+def is_privately_editable(
+    entity: Entity, *, roles: frozenset[str], caller_id: int | None
+) -> bool:
+    """Evaluate who may modify a loaded record, by role, ownership and status.
+
+    Roles accumulate, so each is tried in turn. A contributor modifies its own
+    draft and rejected records; a reviewer modifies any draft, rejected or
+    submitted record; an administrator modifies every record that has not been
+    deleted. Reading a record never implies modifying it.
+    """
+    if entity.deleted_at is not None:
+        return False
+    if ADMINISTRATOR in roles:
+        return True
+    if REVIEWER in roles and entity.status in REVIEWER_EDITABLE_STATUSES:
+        return True
+    return (
+        CONTRIBUTOR in roles
+        and caller_id is not None
+        and entity.created_by_id == caller_id
+        and entity.status in CONTRIBUTOR_EDITABLE_STATUSES
+    )
+
+
 def is_privately_readable(
     entity: Entity | None, *, roles: frozenset[str], caller_id: int | None
 ) -> bool:

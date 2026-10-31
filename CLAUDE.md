@@ -52,6 +52,14 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 - **Migrations.** Une migration par changement de modèle, générée avec
   `makemigrations`, committée avec le code qu'elle accompagne.
 - **Tests.** Tout endpoint ou comportement ajouté vient avec un test pytest.
+  Pendant le développement, cibler les tests affectés ; un seul passage
+  complet final par état fonctionnel, pas un rituel de suites cumulées sur
+  du code inchangé. Après correction, ne relancer que les contrôles concernés ;
+  justifier une nouvelle suite complète par le risque. Conserver la couverture
+  utile, supprimer les vrais doublons et éviter les tests de détails internes
+  sans garantie de comportement supplémentaire. Pas de quota artificiel de cas.
+  Ne pas lancer séparément les anciennes suites juste avant la suite complète,
+  sauf modification pertinente ou échec identifié à vérifier entre les deux.
 - **Rapport.** Chaque intervention crée ou actualise un rapport sous
   `docs/reports/`, contenant : objectif et périmètre, fichiers touchés,
   décisions prises, commandes de vérification et leurs résultats, blocages
@@ -104,8 +112,12 @@ Les routes publiques restent strictement publiques : leur sélection et leurs
 champs sont identiques pour tous les appelants, relecteur et superutilisateur
 compris. Depuis l'incrément 3, `POST /api/manage/entities/` crée une entité et
 son profil en brouillon, avec propriétaire automatiquement attribué au compte
-appelant. Modification, transitions de statut, suppression et restauration
-restent indisponibles et appartiennent aux incréments suivants.
+appelant. L'incrément 4A ajoute le PATCH du détail privé, selon le rôle,
+le propriétaire et le statut (ADR 0005). Les lots 4A et 4B sont validés après
+revue et exercices Postman. Le lot 4B ouvre POST/PATCH/DELETE individuels
+des sources et relations sous le détail privé, avec les droits de la fiche
+porteuse ; les listes imbriquées restent refusées dans les écritures d'entité.
+Transitions de statut, suppression et restauration restent indisponibles.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données
