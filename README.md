@@ -928,7 +928,8 @@ published, non-deleted entities and hides non-public nested references, the
 collection is paginated, searchable and filterable, and the contract is
 published as an OpenAPI schema with Swagger UI and ReDoc.
 
-Phase 4 is under way. Increment 1 delivered JWT token issuance, refresh and
+Phase 4 is complete after review, automated tests and manual exercises.
+Increment 1 delivered JWT token issuance, refresh and
 the protected identity route, validated with manual Postman exercises.
 Increment 2 adds the three editorial groups, created by a data migration, and
 the private read endpoints described above: role and ownership select the
@@ -945,3 +946,9 @@ logical deletion of a record and its restoration.
 
 The public routes stay read-only. Full replacement stays refused, and the
 reclassification of an entity's type is not implemented yet.
+
+The Django administration is a trusted technical maintenance tool, not the
+editorial interface. Its entity forms do not enforce the API's type/profile
+pairing and still allow physical deletion. These limitations are documented
+and deferred; normal editorial work uses the API. A separate basic editorial
+interface will use these API permissions later, outside the corpus import.

@@ -66,11 +66,13 @@ class EntityAdmin(admin.ModelAdmin[Entity]):
     search_fields = ["name"]
     prepopulated_fields = {"slug": ["name"]}
     # Les horodatages de soumission, de revue et de suppression ainsi que
-    # `deleted_by` sont en lecture seule : ils seront posés par les services
-    # de transition de la phase 4, pas saisis à la main. `status`,
-    # `created_by`, `reviewed_by` et `review_notes` restent modifiables, ce
-    # qui permet de préparer des jeux de test — sans constituer pour autant
-    # une implémentation du workflow ni de la matrice de permissions.
+    # `deleted_by` sont en lecture seule : ils sont posés par les actions de
+    # l'API — soumission, revue, suppression logique — et non saisis à la main.
+    # `status`, `created_by`, `reviewed_by` et `review_notes` restent
+    # modifiables pour préparer des jeux de test ; ce back-office n'applique
+    # donc ni le workflow ni la matrice de permissions de l'API, et son action
+    # de suppression reste une suppression physique. Les garanties de l'API
+    # sur le couple type/profil ne s'appliquent pas non plus ici.
     readonly_fields = [
         "id",
         "created_at",

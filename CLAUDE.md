@@ -130,6 +130,15 @@ POST restore est réservé à l'administrateur et conserve le statut antérieur.
 Les variantes actives protègent leur référence, avec acquisition ordonnée des
 verrous sur les chemins API coordonnés. Aucune purge physique d'entité exposée.
 
+La phase 4 est clôturée après la consolidation de l'incrément 8, validée par
+l'auteur le 1er novembre 2026. Django Admin reste réservé à l'administration
+technique, pas à la contribution éditoriale. La future interface simple des
+utilisateurs utilisera l'API et ses rôles, hors du chantier d'import actuel.
+Les limites connues des formulaires type/profil et de suppression physique
+dans l'admin sont acceptées et reportées ; ne pas les corriger au passage ou
+les présenter à nouveau comme des décisions bloquant l'import sans fait nouveau.
+Référence pilotage : `docs/notes/admin-et-interface-editoriale.md`.
+
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données
 externe situé dans `_audit` est autorisé lorsqu'un import le demande

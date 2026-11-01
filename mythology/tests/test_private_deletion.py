@@ -764,3 +764,62 @@ def test_la_vue_privee_n_ouvre_pas_le_remplacement_complet(owner: User) -> None:
     fiche = record("sup-put", "Sup Put", created_by=owner)
 
     assert api(owner).put(detail_url(fiche.slug)).status_code == 405
+
+
+# --- Aller-retour réel entre les routes ---------------------------------
+
+
+def test_le_parcours_publication_suppression_restauration_reouverture(
+    client: Client, owner: User, reviewer: User, admin: User
+) -> None:
+    """Chain the real routes from creation to reopening after a restoration.
+
+    Each step has its own tests. What this adds is the round trip: the marks
+    the deletion writes are exactly the ones the restoration clears, and a
+    restored record is back in the private selection for moderation. The
+    status is never set by a direct update here.
+    """
+    contributeur = api(owner)
+    cree = contributeur.post(
+        reverse("managed-entity-list"),
+        {
+            "name": "Cycle Figure",
+            "slug": "cycle-figure",
+            "entity_type": EntityType.HERO,
+            "gender": Gender.NEUTRAL,
+            "hero_profile": {"titles": ["Fictional title"]},
+        },
+        format="json",
+    )
+
+    assert cree.status_code == 201
+    slug = cree.json()["slug"]
+    public = public_detail_url(slug)
+
+    def action(name: str) -> str:
+        return reverse(f"managed-entity-{name}", kwargs={"slug": slug})
+
+    assert contributeur.post(action("submit")).status_code == 200
+    assert api(reviewer).post(action("publish"), {}, format="json").status_code == 200
+    assert client.get(public).status_code == 200
+
+    assert api(admin).delete(detail_url(slug)).status_code == 204
+
+    assert client.get(public).status_code == 404
+    assert api(admin).get(detail_url(slug)).status_code == 404
+
+    restauree = api(admin).post(action("restore"))
+
+    assert restauree.status_code == 200
+    assert restauree.json()["status"] == EntityStatus.PUBLISHED
+    assert client.get(public).status_code == 200
+    apres = Entity.objects.get(slug=slug)
+    assert apres.deleted_at is None
+    assert apres.deleted_by_id is None
+    assert apres.created_by_id == owner.pk
+    assert apres.reviewed_by_id == reviewer.pk
+
+    assert api(admin).post(action("reopen")).status_code == 200
+
+    assert client.get(public).status_code == 404
+    assert Entity.objects.get(slug=slug).status == EntityStatus.DRAFT
