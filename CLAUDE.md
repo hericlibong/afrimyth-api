@@ -120,8 +120,11 @@ porteuse ; les listes imbriquées restent refusées dans les écritures d'entit�
 L'incrément 5 est validé après revue et exercices Postman : POST submit,
 withdraw et resume appliquent les trois transitions de contribution prévues
 par l'ADR 0002. Le droit de transition est distinct du droit de PATCH.
-Publication, rejet, réouverture d'une fiche publiée, suppression et restauration
-restent indisponibles et relèvent des incréments suivants.
+L'incrément 6 est validé après revue et Postman : publish/reject sont réservés
+au relecteur ou administrateur, reopen à l'administrateur seul. Un rejet exige
+un motif ; les notes de publication sont facultatives. Le public ne reçoit
+aucune marque de revue et ne voit que les fiches publiées non supprimées.
+Suppression et restauration d'entité restent indisponibles (incrément 7).
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données

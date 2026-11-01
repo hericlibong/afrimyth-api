@@ -89,6 +89,9 @@ def test_schema_generation_does_not_need_published_data(
         "/api/manage/entities/{slug}/submit/",
         "/api/manage/entities/{slug}/withdraw/",
         "/api/manage/entities/{slug}/resume/",
+        "/api/manage/entities/{slug}/publish/",
+        "/api/manage/entities/{slug}/reject/",
+        "/api/manage/entities/{slug}/reopen/",
         "/api/auth/token/",
         "/api/auth/token/refresh/",
         "/api/auth/me/",
@@ -126,6 +129,9 @@ WRITABLE_OPERATIONS = {
     "/api/manage/entities/{slug}/submit/": {"post"},
     "/api/manage/entities/{slug}/withdraw/": {"post"},
     "/api/manage/entities/{slug}/resume/": {"post"},
+    "/api/manage/entities/{slug}/publish/": {"post"},
+    "/api/manage/entities/{slug}/reject/": {"post"},
+    "/api/manage/entities/{slug}/reopen/": {"post"},
 }
 
 
@@ -169,6 +175,9 @@ PROTECTED_PATHS = {
     "/api/manage/entities/{slug}/submit/",
     "/api/manage/entities/{slug}/withdraw/",
     "/api/manage/entities/{slug}/resume/",
+    "/api/manage/entities/{slug}/publish/",
+    "/api/manage/entities/{slug}/reject/",
+    "/api/manage/entities/{slug}/reopen/",
 }
 
 
@@ -749,9 +758,15 @@ TRANSITION_PATHS = {
     "submit": "/api/manage/entities/{slug}/submit/",
     "withdraw": "/api/manage/entities/{slug}/withdraw/",
     "resume": "/api/manage/entities/{slug}/resume/",
+    "publish": "/api/manage/entities/{slug}/publish/",
+    "reject": "/api/manage/entities/{slug}/reject/",
+    "reopen": "/api/manage/entities/{slug}/reopen/",
 }
 
-TRANSITION_NAMES = sorted(TRANSITION_PATHS)
+#: Les quatre actions sans entrée ; les deux décisions ont la leur.
+TRANSITION_NAMES = ["submit", "withdraw", "resume", "reopen"]
+
+DECISION_NAMES = ["publish", "reject"]
 
 
 def transition_operation(schema: dict[str, Any], action: str) -> dict[str, Any]:
@@ -830,18 +845,112 @@ def test_the_transitions_state_what_happens_to_the_review_marks(
     assert "cleared by the next submission" in resume
 
 
-def test_no_moderation_decision_is_announced(schema: dict[str, Any]) -> None:
-    """Publication, rejection and reopening must not look available."""
-    description = schema["info"]["description"]
-    detail = schema["paths"]["/api/manage/entities/{slug}/"]["get"]["description"]
+# --- Moderation decisions -----------------------------------------------
 
-    assert "publication, rejection" in description
+
+@pytest.mark.parametrize("action", DECISION_NAMES)
+def test_a_moderation_action_is_protected_and_declares_its_refusals(
+    schema: dict[str, Any], action: str
+) -> None:
+    """Each decision needs a token and documents 400, 401, 403 and 404."""
+    operation = transition_operation(schema, action)
+
+    assert operation["security"] == [{"jwtAuth": []}]
+    assert sorted(operation["responses"]) == ["200", "400", "401", "403", "404"]
+    assert "an actor of its transitions" in operation["responses"]["403"]["description"]
+
+
+@pytest.mark.parametrize("action", DECISION_NAMES)
+def test_a_moderation_action_answers_with_the_private_detail(
+    schema: dict[str, Any], action: str
+) -> None:
+    body = transition_operation(schema, action)["responses"]["200"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+
+    assert reference.endswith("/PrivateEntityDetail")
+
+
+@pytest.mark.parametrize(
+    ("action", "component", "required"),
+    [("publish", "PublishNotesRequest", False), ("reject", "RejectNotesRequest", True)],
+)
+def test_a_decision_declares_only_its_review_note(
+    schema: dict[str, Any], action: str, component: str, required: bool
+) -> None:
+    """The note is the only input, optional on publish and required on reject."""
+    body = transition_operation(schema, action)["requestBody"]
+    reference = body["content"]["application/json"]["schema"]["$ref"]
+
+    assert reference.endswith(f"/{component}")
+    declared = schema["components"]["schemas"][component]
+    assert set(declared["properties"]) == {"review_notes"}
+    assert declared.get("required", []) == (["review_notes"] if required else [])
+
+
+def test_the_reopening_cannot_carry_a_note(schema: dict[str, Any]) -> None:
+    """Reopening keeps the empty-body contract of the other transitions."""
+    description = transition_operation(schema, "reopen")["description"]
+
+    assert "a note cannot be attached here" in description
+
+
+def test_the_decisions_state_who_may_act_and_what_is_written(
+    schema: dict[str, Any],
+) -> None:
+    """Ownership grants nothing, and reopening is reserved to an administrator."""
+    publish = transition_operation(schema, "publish")["description"]
+    reject = transition_operation(schema, "reject")["description"]
+    reopen = transition_operation(schema, "reopen")["description"]
+
+    for description in (publish, reject, reopen):
+        assert "Owning the record grants nothing here" in description
+    assert "`reviewed_by` set to the calling account" in publish
+    assert "`submitted_at` is kept exactly as it was" in publish
+    assert "never keeps an earlier one" in publish
+    assert "**required** and non-blank" in reject
+    assert "stays absent from the public endpoints" in reject
+    assert "only by an administrator" in reopen
+    assert "not** recorded as the reviewer" in reopen
+
+
+def test_the_review_notes_are_announced_as_private(schema: dict[str, Any]) -> None:
+    """No public payload may carry a review note."""
+    for action in DECISION_NAMES + ["reopen"]:
+        description = transition_operation(schema, action)["description"]
+        assert "review notes stay private" in description
+
+
+def test_the_global_description_announces_the_moderation(
+    schema: dict[str, Any],
+) -> None:
+    description = schema["info"]["description"]
+
+    assert "publish/" in description
+    assert "Owning a record grants none of these" in description
+    assert "reopening needs an" in description
+    assert (
+        "the moderation decisions — publication, rejection, reopening"
+        not in description
+    )
+
+
+def test_the_deletion_of_an_entity_stays_unavailable(schema: dict[str, Any]) -> None:
+    """Increment 7 must not look delivered."""
+    description = schema["info"]["description"]
+    detail = schema["paths"][PRIVATE_DETAIL]["get"]["description"]
+
+    assert "logical deletion or restoration of an entity are planned" in description
     assert "not** part of this" in description
-    assert "Publication, rejection, reopening" in detail
+    assert "deletion and restoration of an entity are not available yet" in detail
+
+
+def test_the_global_description_keeps_entity_and_submission_limits(
+    schema: dict[str, Any],
+) -> None:
+    description = schema["info"]["description"]
+
     assert "On the entity collection and detail themselves" in description
     assert "clear `submitted_at` and preserve the review marks" in description
-    for path in TRANSITION_PATHS.values():
-        assert set(schema["paths"][path]) == {"post"}, path
 
 
 def test_the_private_descriptions_no_longer_claim_a_read_only_api(

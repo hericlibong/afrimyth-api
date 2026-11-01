@@ -141,6 +141,7 @@ class CreationErrorSerializer(serializers.Serializer[None]):
     gender = serializers.ListField(child=serializers.CharField(), required=False)
     variant_of = serializers.ListField(child=serializers.CharField(), required=False)
     status = serializers.ListField(child=serializers.CharField(), required=False)
+    review_notes = serializers.ListField(child=serializers.CharField(), required=False)
     non_field_errors = serializers.ListField(
         child=serializers.CharField(), required=False
     )
@@ -494,11 +495,11 @@ PRIVATE_DETAIL_DESCRIPTION = (
     "which records this account may read.\n\n"
     "`PATCH` updates this record; see that operation. Its documentary sources "
     "and relations are written one by one under `sources/` and `relations/`, "
-    "and it is submitted, withdrawn or resumed by a `POST` on `submit/`, "
-    "`withdraw/` or `resume/`. `PUT` and `DELETE` are refused with "
-    "`405 Method Not Allowed`, for every role, and creation is a `POST` on the "
-    "collection. Publication, rejection, reopening and the deletion of an "
-    "entity are not available yet."
+    "and its editorial state moves by a `POST` on `submit/`, `withdraw/`, "
+    "`resume/`, `publish/`, `reject/` or `reopen/`. `PUT` and `DELETE` are "
+    "refused with `405 Method Not Allowed`, for every role, and creation is a "
+    "`POST` on the collection. The deletion and restoration of an entity are "
+    "not available yet."
 )
 
 PRIVATE_LIST_EXAMPLE = OpenApiExample(
@@ -1176,8 +1177,10 @@ TRANSITION_FORBIDDEN_RESPONSE = OpenApiResponse(
     description=(
         "Either the token is valid but its account holds no editorial role, or "
         "the account may read this record without being an actor of its "
-        "transitions — a contributor facing a record owned by someone else, "
-        "for instance. The body distinguishes the two cases."
+        "transitions. The right depends on the action, not on the route: "
+        "owning a record never allows publishing or rejecting it, and "
+        "reopening a published record needs an administrator. The body names "
+        "the actor the action requires."
     ),
     examples=[
         OpenApiExample(
@@ -1185,10 +1188,9 @@ TRANSITION_FORBIDDEN_RESPONSE = OpenApiResponse(
             response_only=True,
             value={
                 "detail": (
-                    "This account may read this record but not run an "
-                    "editorial transition on it. Submitting, withdrawing and "
-                    "resuming require being the record's own contributor, a "
-                    "reviewer or an administrator."
+                    "This account may read this record but not run this action "
+                    "on it. Publishing requires a reviewer or an "
+                    "administrator; owning the record grants nothing here."
                 )
             },
         )
@@ -1224,6 +1226,157 @@ TRANSITION_INVALID_RESPONSE = OpenApiResponse(
                     "than ignored."
                 ]
             },
+        ),
+    ],
+)
+
+
+# --- Moderation decisions -----------------------------------------------
+#
+# Trois décisions. Seules les deux premières reçoivent une note ; la
+# réouverture garde le contrat vide des transitions de l'incrément 5.
+
+DECISION_ACCESS = (
+    "Requires an access token and an editorial role. **Owning the record "
+    "grants nothing here**: publishing and rejecting need a reviewer or an "
+    "administrator, and reopening needs an administrator. Reviewers and "
+    "administrators also act on a record that has no owner. A record this "
+    "account may read without being an actor of the action returns `403`, "
+    "before any diagnosis of the status or of the body; an unknown slug, an "
+    "unreadable record and a deleted record all return the same `404`.\n\n"
+    "No self-review rule and no second approver are enforced: the matrix does "
+    "not require them.\n\n"
+)
+
+DECISION_RESULT = (
+    "Only the editorial state is written, in a single transaction, on the "
+    "locked row: the owner, the type, the business fields, the profile, the "
+    "reference data, the sources, the relations, `created_at` and the deletion "
+    "marks are untouched, and `updated_at` moves only on success. The actor "
+    "and the dates always come from the server. A refused request changes "
+    "nothing at all, and two concurrent decisions on the same submission "
+    "cannot both succeed.\n\n"
+    "**Response.** `200` with the private detail representation of the record, "
+    "whose nested references follow the calling account's own read rule. The "
+    "review notes stay private: no public payload ever carries them."
+)
+
+PUBLISH_DESCRIPTION = (
+    "Publishes a `submitted` record: its status becomes `published`, and the "
+    "review is recorded.\n\n"
+    + DECISION_ACCESS
+    + "**Only a submitted record can be published.** Any other starting status "
+    "returns `400`, which is also what a second publication returns. A draft "
+    "or a rejected record is never published directly: it goes through a "
+    "submission first.\n\n"
+    "**Input.** Send no body, an empty JSON object `{}`, or the single "
+    "optional key `review_notes`. An omitted or empty note stores an **empty** "
+    "note — it never keeps an earlier one — and `null` is not a note. Every "
+    "other key, including the status, the actor and the dates, is refused "
+    "rather than ignored.\n\n"
+    "**What is written.** `status`, `reviewed_at` set to the server's current "
+    "time, `reviewed_by` set to the calling account, and `review_notes`. "
+    "`submitted_at` is kept exactly as it was, even `null` on a record "
+    "prepared by hand: a submission date is never invented.\n\n"
+    "Publishing is a human decision, not a certification engine: no "
+    "completeness threshold is checked. Once published, the record appears on "
+    "the public endpoints through the existing public selection, which exposes "
+    "no editorial field and no review note.\n\n" + DECISION_RESULT
+)
+
+REJECT_DESCRIPTION = (
+    "Rejects a `submitted` record: its status becomes `rejected`, and the "
+    "reason is recorded.\n\n"
+    + DECISION_ACCESS
+    + "**Only a submitted record can be rejected.** Any other starting status "
+    "returns `400`, which is also what a second rejection returns. A published "
+    "record is not rejected: it is reopened first.\n\n"
+    "**Input.** A JSON object carrying `review_notes`, **required** and "
+    "non-blank: the reason is what lets the contributor correct the record. A "
+    "missing body, an empty object, a blank or whitespace-only reason and "
+    "`null` all return `400`. No rejection code or category is invented, and "
+    "every other key is refused rather than ignored.\n\n"
+    "**What is written.** `status`, `reviewed_at`, `reviewed_by` and "
+    "`review_notes`; `submitted_at` is kept as it was. A rejected record stays "
+    "absent from the public endpoints.\n\n"
+    "The owner reads the rejection on the private detail and calls `resume/` "
+    "to return to `draft`, which keeps the review; the next submission clears "
+    "it.\n\n" + DECISION_RESULT
+)
+
+REOPEN_DESCRIPTION = (
+    "Reopens a `published` record: its status returns to `draft` and "
+    "`submitted_at` is cleared, so the record can be corrected and submitted "
+    "again.\n\n"
+    + DECISION_ACCESS
+    + "**Only a published record can be reopened**, and only by an "
+    "administrator — a reviewer is refused with `403`. Any other starting "
+    "status returns `400`.\n\n"
+    "**No input**, exactly like `withdraw/` and `resume/`. Send no body at "
+    "all, or an empty JSON object `{}`; a note cannot be attached here.\n\n"
+    "**The last review is kept** — `reviewed_at`, `reviewed_by` and "
+    "`review_notes` — to guide the corrections, and is cleared by the next "
+    "submission. Reopening is not giving a review: the administrator who "
+    "reopens is **not** recorded as the reviewer.\n\n"
+    "The record disappears from the public endpoints as soon as it is "
+    "reopened.\n\n" + DECISION_RESULT
+)
+
+PUBLISH_REQUEST_EXAMPLE = OpenApiExample(
+    "Publication note (synthetic)",
+    description=(
+        "Invented note, shown to illustrate the only accepted key. The whole "
+        "body may also be omitted, which stores an empty note."
+    ),
+    request_only=True,
+    value={"review_notes": "Reviewed and approved."},
+)
+
+REJECT_REQUEST_EXAMPLE = OpenApiExample(
+    "Rejection reason (synthetic)",
+    description=(
+        "Invented reason, shown to illustrate the required key. A rejection "
+        "without a non-blank reason is refused."
+    ),
+    request_only=True,
+    value={"review_notes": "Please clarify the source of this claim."},
+)
+
+DECISION_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "The record was **not** changed: either its starting status does not "
+        "allow this decision — which includes repeating one that has already "
+        "succeeded — or the body is invalid: a missing or blank rejection "
+        "reason, a note sent as `null`, a server-controlled field, an "
+        "unrecognised key, or a JSON body that is not an object. No status, "
+        "date or note is written in any of these cases."
+    ),
+    examples=[
+        OpenApiExample(
+            "WrongStartingStatus",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "Only a submitted record can be published. This record is "
+                    "currently 'draft'."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "MissingRejectionReason",
+            response_only=True,
+            value={"review_notes": ["This field is required."]},
+        ),
+        OpenApiExample(
+            "BlankRejectionReason",
+            response_only=True,
+            value={"review_notes": ["This field may not be blank."]},
+        ),
+        OpenApiExample(
+            "ServerControlledField",
+            response_only=True,
+            value={"reviewed_by": ["The reviewer is the authenticated account."]},
         ),
     ],
 )

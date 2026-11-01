@@ -6,8 +6,8 @@ which add the editorial fields and apply the caller's own visibility rule to
 nested references. Four write representations: `PrivateEntityCreateSerializer`
 creates a draft entity with its profile, `PrivateEntityUpdateSerializer`
 patches an existing one, and `SourceWriteSerializer` and
-`RelationWriteSerializer` write one child row of a record. Status transitions,
-deletion and restoration arrive with later increments.
+`RelationWriteSerializer` write one child row of a record. Moderation notes
+have their own inputs; entity deletion and restoration arrive later.
 
 The private representations are subclasses, not copies: they inherit every
 business field and only declare what differs. Nothing switches a public
@@ -498,7 +498,7 @@ OWNER_REASON = (
     "by an administrator."
 )
 REVIEW_REASON = (
-    "Review marks are set by the review actions, which are not available yet."
+    "Review marks are set by the dedicated moderation actions, not ordinary writes."
 )
 DELETION_REASON = (
     "Deletion marks are set by the deletion action, which is not available yet."
@@ -1164,3 +1164,73 @@ class RelationWriteSerializer(serializers.ModelSerializer[EntityRelation]):
         self, instance: EntityRelation, validated_data: dict[str, Any]
     ) -> EntityRelation:
         return patched_and_saved(instance, validated_data)
+
+
+# --- Review notes of a moderation decision ------------------------------
+#
+# Les deux seules entrées des décisions : une note, facultative à la
+# publication, obligatoire au rejet. Le statut, le relecteur et les dates
+# viennent du serveur et sont refusés nommément.
+
+DECISION_STATUS_REASON = "The new status is decided by the action itself."
+DECISION_REVIEWER_REASON = "The reviewer is the authenticated account."
+DECISION_DATE_REASON = "The review date is set by the server."
+DECISION_SUBMITTED_AT_REASON = "A decision never changes the submission date."
+UNKNOWN_DECISION_FIELD_REASON = "Unknown input field for this decision."
+
+REJECTED_DECISION_FIELDS: dict[str, str] = {
+    "id": CHILD_IDENTIFIER_REASON,
+    "pk": CHILD_IDENTIFIER_REASON,
+    "status": DECISION_STATUS_REASON,
+    "reviewed_by": DECISION_REVIEWER_REASON,
+    "reviewed_at": DECISION_DATE_REASON,
+    "submitted_at": DECISION_SUBMITTED_AT_REASON,
+    "created_by": UPDATE_OWNER_REASON,
+    "created_by_id": UPDATE_OWNER_REASON,
+}
+
+PUBLISH_NOTES_HELP = (
+    "Optional note explaining the publication. An omitted or empty note stores "
+    "an empty note; it never keeps an earlier one. `null` is not a note."
+)
+
+REJECT_NOTES_HELP = (
+    "Required reason for the rejection, to guide the corrections. A blank or "
+    "whitespace-only reason is refused."
+)
+
+
+def reject_decision_keys(data: Any, fields: Mapping[str, Any]) -> None:
+    """Refuse every key a decision does not accept, instead of dropping it."""
+    if not isinstance(data, Mapping):
+        return
+    errors = rejected_key_errors(
+        data,
+        fields,
+        rejected=REJECTED_DECISION_FIELDS,
+        unknown_reason=UNKNOWN_DECISION_FIELD_REASON,
+    )
+    if errors:
+        raise serializers.ValidationError(errors)
+
+
+class PublishNotesSerializer(serializers.Serializer[None]):
+    """Input of a publication: an optional review note, and nothing else."""
+
+    review_notes = serializers.CharField(
+        required=False, allow_blank=True, help_text=PUBLISH_NOTES_HELP
+    )
+
+    def to_internal_value(self, data: Any) -> Any:
+        reject_decision_keys(data, self.fields)
+        return super().to_internal_value(data)
+
+
+class RejectNotesSerializer(serializers.Serializer[None]):
+    """Input of a rejection: a required review note, and nothing else."""
+
+    review_notes = serializers.CharField(help_text=REJECT_NOTES_HELP)
+
+    def to_internal_value(self, data: Any) -> Any:
+        reject_decision_keys(data, self.fields)
+        return super().to_internal_value(data)

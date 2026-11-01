@@ -28,6 +28,7 @@ from mythology.permissions import NOT_EDITABLE_MESSAGE, CanEditEntity, HasBusine
 from mythology.schema import (
     CHILD_INVALID_RESPONSE,
     CHILD_NOT_FOUND_RESPONSE,
+    DECISION_INVALID_RESPONSE,
     DETAIL_DESCRIPTION,
     DETAIL_EXAMPLE,
     ENTITY_NOT_FOUND_RESPONSE,
@@ -51,11 +52,16 @@ from mythology.schema import (
     PRIVATE_UPDATE_DESCRIPTION,
     PRIVATE_UPDATE_INVALID_RESPONSE,
     PRIVATE_UPDATE_REQUEST_EXAMPLE,
+    PUBLISH_DESCRIPTION,
+    PUBLISH_REQUEST_EXAMPLE,
+    REJECT_DESCRIPTION,
+    REJECT_REQUEST_EXAMPLE,
     RELATION_CREATE_DESCRIPTION,
     RELATION_DELETE_DESCRIPTION,
     RELATION_ID_PARAMETER,
     RELATION_REQUEST_EXAMPLE,
     RELATION_UPDATE_DESCRIPTION,
+    REOPEN_DESCRIPTION,
     RESUME_DESCRIPTION,
     SOURCE_CREATE_DESCRIPTION,
     SOURCE_DELETE_DESCRIPTION,
@@ -84,13 +90,17 @@ from mythology.serializers import (
     PrivateEntityDetailSerializer,
     PrivateEntityListSerializer,
     PrivateEntityUpdateSerializer,
+    PublishNotesSerializer,
+    RejectNotesSerializer,
     RelationWriteSerializer,
     SourceSerializer,
     SourceWriteSerializer,
 )
 from mythology.transitions import (
     EMPTY_BODY_MESSAGE,
-    NOT_ALLOWED_MESSAGE,
+    PUBLISH,
+    REJECT,
+    REOPEN,
     REQUIRED_STATUS,
     RESUME,
     SUBMIT,
@@ -98,6 +108,7 @@ from mythology.transitions import (
     WITHDRAW,
     apply_transition,
     may_transition,
+    not_allowed_reason,
     wrong_status_reason,
 )
 
@@ -112,6 +123,13 @@ ISO_CODE_PATTERN = re.compile(r"^[A-Za-z]{2}$")
 CHILD_ACTIONS = frozenset(
     {"create_source", "source_detail", "create_relation", "relation_detail"}
 )
+
+#: Les deux seules actions qui acceptent un corps : la note de revue. Les
+#: quatre autres transitions n'acceptent aucune entrée.
+DECISION_SERIALIZERS: dict[str, type[BaseSerializer[Any]]] = {
+    PUBLISH: PublishNotesSerializer,
+    REJECT: RejectNotesSerializer,
+}
 
 
 class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
@@ -635,17 +653,40 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
                 pk=entity.pk,
             )
             if not may_transition(
-                locked, roles=self.caller_roles, caller_id=self.caller_id
+                locked, action, roles=self.caller_roles, caller_id=self.caller_id
             ):
-                raise PermissionDenied(NOT_ALLOWED_MESSAGE)
+                raise PermissionDenied(not_allowed_reason(action))
             if locked.status != REQUIRED_STATUS[action]:
                 raise ValidationError(
                     {"non_field_errors": [wrong_status_reason(locked, action)]}
                 )
+            actor = self.request.user
+            # Garanti par les classes de permission de la vue.
+            assert isinstance(actor, User)
+            apply_transition(
+                locked,
+                action,
+                actor=actor,
+                review_notes=self.validated_review_notes(action),
+            )
+        return self.private_detail_of(locked)
+
+    def validated_review_notes(self, action: str) -> str:
+        """Validate the request body and return the note this action stores.
+
+        Only the two decisions carry an input. The four other actions accept
+        no body at all, and any payload is refused rather than ignored.
+        """
+        notes_serializer = DECISION_SERIALIZERS.get(action)
+        if notes_serializer is None:
             if not (isinstance(self.request.data, Mapping) and not self.request.data):
                 raise ValidationError({"non_field_errors": [EMPTY_BODY_MESSAGE]})
-            apply_transition(locked, action)
-        return self.private_detail_of(locked)
+            return ""
+        serializer = notes_serializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        notes = serializer.validated_data.get("review_notes", "")
+        assert isinstance(notes, str)
+        return notes
 
     def private_detail_of(self, entity: Entity) -> Response:
         """Render one record with the private detail, references filtered."""
@@ -714,3 +755,64 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
     def resume(self, request: Request, **kwargs: Any) -> Response:
         """Move a rejected record back to `draft`, keeping the last review."""
         return self.run_transition(RESUME)
+
+    # --- Décisions de modération ----------------------------------------
+
+    @extend_schema(
+        operation_id="managed_entities_publish",
+        tags=["management"],
+        summary="Publish a submitted record",
+        description=PUBLISH_DESCRIPTION,
+        request=PublishNotesSerializer,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: DECISION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+        examples=[PUBLISH_REQUEST_EXAMPLE],
+    )
+    @action(detail=True, methods=["post"], url_path="publish", url_name="publish")
+    def publish(self, request: Request, **kwargs: Any) -> Response:
+        """Publish a submitted record, recording the reviewer and the date."""
+        return self.run_transition(PUBLISH)
+
+    @extend_schema(
+        operation_id="managed_entities_reject",
+        tags=["management"],
+        summary="Reject a submitted record",
+        description=REJECT_DESCRIPTION,
+        request=RejectNotesSerializer,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: DECISION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+        examples=[REJECT_REQUEST_EXAMPLE],
+    )
+    @action(detail=True, methods=["post"], url_path="reject", url_name="reject")
+    def reject(self, request: Request, **kwargs: Any) -> Response:
+        """Reject a submitted record, recording the required reason."""
+        return self.run_transition(REJECT)
+
+    @extend_schema(
+        operation_id="managed_entities_reopen",
+        tags=["management"],
+        summary="Reopen a published record as a draft",
+        description=REOPEN_DESCRIPTION,
+        request=None,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: TRANSITION_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: TRANSITION_FORBIDDEN_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="reopen", url_name="reopen")
+    def reopen(self, request: Request, **kwargs: Any) -> Response:
+        """Reopen a published record as a draft, keeping the last review."""
+        return self.run_transition(REOPEN)
