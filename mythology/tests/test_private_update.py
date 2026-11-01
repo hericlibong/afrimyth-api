@@ -914,13 +914,11 @@ def test_attachment_validation_uses_the_locked_state(
 # --- Les autres écritures restent fermées -------------------------------
 
 
-@pytest.mark.parametrize("method", ["put", "delete"])
-def test_le_remplacement_et_la_suppression_restent_refuses(
-    fiche: Entity, method: str
-) -> None:
+def test_le_remplacement_complet_reste_refuse(fiche: Entity) -> None:
+    """`PUT` stays closed; `DELETE` is the logical deletion of increment 7."""
     client = api(account("administratrice-fermee", groups=(ADMINISTRATOR,)))
 
-    assert getattr(client, method)(detail_url(fiche.slug)).status_code == 405
+    assert client.put(detail_url(fiche.slug)).status_code == 405
 
 
 def test_le_patch_public_reste_refuse(fiche: Entity, owner: User) -> None:

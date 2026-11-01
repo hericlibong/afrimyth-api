@@ -16,9 +16,14 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from mythology.deletion import DELETION_ACTIONS
 from mythology.models import Entity
 from mythology.selectors import is_privately_editable
 from mythology.transitions import TRANSITION_ACTIONS
+
+#: Actions dont le droit est décidé par leur propre règle métier : les six
+#: transitions éditoriales, la suppression logique et la restauration.
+SELF_GOVERNED_ACTIONS = TRANSITION_ACTIONS | DELETION_ACTIONS
 
 #: Message du 403 d'une fiche lisible mais non modifiable. Public, donc en
 #: anglais ; partagé avec le refus posé sur l'état verrouillé à l'écriture.
@@ -71,10 +76,12 @@ class CanEditEntity(BasePermission):
         """Refuse an unsafe method on a record this account may not modify."""
         if request.method in SAFE_METHODS:
             return True
-        # Une transition n'est pas une écriture ordinaire : un contributeur
-        # retire sa propre fiche soumise, que cette règle lui refuse justement
-        # de modifier. Son droit est décidé par `may_transition()`.
-        if getattr(view, "action", None) in TRANSITION_ACTIONS:
+        # Une transition et une suppression ne sont pas des écritures
+        # ordinaires : un contributeur retire sa propre fiche soumise, et un
+        # relecteur modifie un `submitted` sans pouvoir le supprimer. Cette
+        # règle refuse justement ces cas ; leur droit est décidé par
+        # `may_transition()`, `may_delete()` et `may_restore()`.
+        if getattr(view, "action", None) in SELF_GOVERNED_ACTIONS:
             return True
         return is_privately_editable(
             obj,

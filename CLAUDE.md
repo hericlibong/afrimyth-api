@@ -124,7 +124,11 @@ L'incrément 6 est validé après revue et Postman : publish/reject sont réserv
 au relecteur ou administrateur, reopen à l'administrateur seul. Un rejet exige
 un motif ; les notes de publication sont facultatives. Le public ne reçoit
 aucune marque de revue et ne voit que les fiches publiées non supprimées.
-Suppression et restauration d'entité restent indisponibles (incrément 7).
+L'incrément 7 est validé après revue et Postman : DELETE du détail privé est
+logique et suit sa propre matrice (reviewer sur draft/rejected seulement) ;
+POST restore est réservé à l'administrateur et conserve le statut antérieur.
+Les variantes actives protègent leur référence, avec acquisition ordonnée des
+verrous sur les chemins API coordonnés. Aucune purge physique d'entité exposée.
 
 **Dossier `_audit`.** Ne recopie jamais le dossier, son code, ses images ni un
 corpus complet dans ce dépôt. En revanche, **lire** un fichier de données

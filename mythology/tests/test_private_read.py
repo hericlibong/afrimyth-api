@@ -781,25 +781,28 @@ def test_une_page_inexistante_renvoie_404(
 # gardent fermé tout le reste.
 
 
-@pytest.mark.parametrize("method", ["put", "delete"])
-def test_le_remplacement_et_la_suppression_sont_refuses_meme_a_un_administrateur(
-    corpus: dict[str, Entity], method: str
+def test_le_remplacement_est_refuse_meme_a_un_administrateur(
+    corpus: dict[str, Entity],
 ) -> None:
-    """Reject replacement and deletion with 405 even for administrators."""
+    """Reject the full replacement with 405 even for administrators."""
     client = api(account("administrateur-ecriture", groups=(ADMINISTRATOR,)))
 
-    collection = getattr(client, method)(PRIVATE_LIST_URL)
-    fiche = getattr(client, method)(private_detail_url("draft-owner"))
+    collection = client.put(PRIVATE_LIST_URL)
+    fiche = client.put(private_detail_url("draft-owner"))
 
     assert collection.status_code == 405
     assert fiche.status_code == 405
 
 
-@pytest.mark.parametrize("method", ["post", "put", "delete"])
-def test_le_detail_prive_n_accepte_que_la_modification_partielle(
+@pytest.mark.parametrize("method", ["post", "put"])
+def test_le_detail_prive_n_accepte_ni_creation_ni_remplacement(
     corpus: dict[str, Entity], method: str
 ) -> None:
-    """Keep every write but `PATCH` closed on the private detail URL."""
+    """Keep creation and replacement closed on the private detail URL.
+
+    `PATCH` and `DELETE` have their own suites; the collection refuses
+    `DELETE` in the test below.
+    """
     client = api(account("administrateur-detail-ecriture", groups=(ADMINISTRATOR,)))
 
     assert getattr(client, method)(private_detail_url("draft-owner")).status_code == 405

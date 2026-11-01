@@ -496,10 +496,10 @@ PRIVATE_DETAIL_DESCRIPTION = (
     "`PATCH` updates this record; see that operation. Its documentary sources "
     "and relations are written one by one under `sources/` and `relations/`, "
     "and its editorial state moves by a `POST` on `submit/`, `withdraw/`, "
-    "`resume/`, `publish/`, `reject/` or `reopen/`. `PUT` and `DELETE` are "
-    "refused with `405 Method Not Allowed`, for every role, and creation is a "
-    "`POST` on the collection. The deletion and restoration of an entity are "
-    "not available yet."
+    "`resume/`, `publish/`, `reject/` or `reopen/`. `DELETE` deletes it "
+    "logically, and a `POST` on `restore/` brings it back. `PUT` is refused "
+    "with `405 Method Not Allowed`, for every role, and creation is a `POST` "
+    "on the collection."
 )
 
 PRIVATE_LIST_EXAMPLE = OpenApiExample(
@@ -1377,6 +1377,190 @@ DECISION_INVALID_RESPONSE = OpenApiResponse(
             "ServerControlledField",
             response_only=True,
             value={"reviewed_by": ["The reviewer is the authenticated account."]},
+        ),
+    ],
+)
+
+
+# --- Soft deletion and restoration --------------------------------------
+
+SOFT_DELETE_DESCRIPTION = (
+    "Deletes one record **logically**: `deleted_at` and `deleted_by` are set, "
+    "and nothing is physically removed. The entity row, its profile, its "
+    "documentary sources, its relations and its reference attachments all stay "
+    "in place, so no child is ever orphaned and a restoration can bring the "
+    "record back untouched.\n\n"
+    "**Who may delete what.** A contributor deletes its own `draft` and "
+    "`rejected` records. A reviewer deletes any `draft` or `rejected` record, "
+    "owned or not, but neither a `submitted` nor a `published` one — the right "
+    "to update a submitted record is not the right to delete it. An "
+    "administrator deletes any status. A readable record this account may not "
+    "delete returns `403`; an unknown slug, an unreadable record and an "
+    "already deleted record all return the same `404`, so a second `DELETE` "
+    "answers `404` and never replaces the first actor or date.\n\n"
+    "**No input.** Send no body at all, or an empty JSON object `{}`; any "
+    "other body is refused rather than ignored. The date and the actor come "
+    "from the server, and the status, the owner, the submission and review "
+    "marks and every business field are kept exactly as they were.\n\n"
+    "**Variants protect their reference.** The request returns `400` when at "
+    "least one **active** figure is a direct cultural variant of this one — "
+    "whatever the status, the owner or the readability of that variant "
+    "(ADR 0002). A logically deleted variant does not protect anything. The "
+    "error names neither the variants nor how many there are.\n\n"
+    "**After the deletion** the record disappears from the public endpoints "
+    "and from the ordinary private reads, for every role including an "
+    "administrator, and accepts no update, child write or editorial "
+    "transition. Structured references pointing at it are hidden by the "
+    "existing filters, and a hidden target name is never copied into "
+    "`to_name`.\n\n"
+    "The operation runs in one transaction on the locked row: the visibility, "
+    "the right and the variant protection are re-read there, so a refused "
+    "request leaves every column untouched — `updated_at` included — and two "
+    "concurrent requests cannot overwrite marks already set.\n\n"
+    "**Response.** `204` with no body. This is not the `DELETE` of a "
+    "documentary source or of a relation, which really removes that one row."
+)
+
+RESTORE_DESCRIPTION = (
+    "Restores one logically deleted record: `deleted_at` and `deleted_by` are "
+    "cleared, and nothing else is written.\n\n"
+    "**Administrators only**, whatever the status that was kept. Every other "
+    "account receives `403` for an existing slug exactly as for an unknown "
+    "one, so no one learns which slugs exist among the deleted records. The "
+    "role is checked before any lookup.\n\n"
+    "For an administrator, the record is looked up by slug among all records: "
+    "an unknown slug returns `404`, and a record that exists but is **not** "
+    "deleted returns `400` without any mutation — which is also what a second "
+    "restoration of the same record returns. That full lookup is confined to "
+    "this operation; the reads, the updates, the children and the transitions "
+    "of these routes keep excluding deleted records.\n\n"
+    "**No input**, like the deletion: no body or an empty JSON object `{}`.\n\n"
+    "**The previous status is kept.** A record deleted while `published` "
+    "becomes **public again** as soon as it is restored; one deleted as a "
+    "draft, submitted or rejected stays private under the usual rights. "
+    "Restoring is neither a reopening nor a new publication: the submission "
+    "and review marks are preserved and the reviewer is never replaced.\n\n"
+    "**Variants keep their invariant.** When the restored record is itself a "
+    "cultural variant whose reference is still deleted, the request returns "
+    "`400` without any mutation: the reference has to be restored first. No "
+    "`variant_of` is ever cleared and no other record is restored "
+    "automatically.\n\n"
+    "**Response.** `200` with the private detail representation of the "
+    "restored record, whose nested references follow the calling account own "
+    "read rule."
+)
+
+NOT_DELETABLE_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "Either the token is valid but its account holds no editorial role, or "
+        "the account may read this record without being allowed to delete it: "
+        "a reviewer facing a submitted or published record, or a contributor "
+        "facing a record it does not own. The body distinguishes the two "
+        "cases."
+    ),
+    examples=[
+        OpenApiExample(
+            "NotDeletableByThisAccount",
+            response_only=True,
+            value={
+                "detail": (
+                    "This account may read this record but not delete it. A "
+                    "contributor deletes its own draft and rejected records, a "
+                    "reviewer any draft or rejected record; a submitted or "
+                    "published record requires an administrator."
+                )
+            },
+        )
+    ],
+)
+
+NOT_RESTORABLE_RESPONSE = OpenApiResponse(
+    response=ErrorDetailSerializer,
+    description=(
+        "Either the token is valid but its account holds no editorial role, or "
+        "the account is not an administrator. The same response is returned "
+        "for an existing slug and for an unknown one: it never reveals which "
+        "records are deleted."
+    ),
+    examples=[
+        OpenApiExample(
+            "RestoreNeedsAnAdministrator",
+            response_only=True,
+            value={
+                "detail": (
+                    "Restoring a deleted record requires an administrator. No "
+                    "other account is told whether a given slug exists among "
+                    "the deleted records."
+                )
+            },
+        )
+    ],
+)
+
+SOFT_DELETE_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "Nothing was deleted: either the figure still has an active cultural "
+        "variant, or the request carried a body. No column is written in "
+        "either case."
+    ),
+    examples=[
+        OpenApiExample(
+            "ProtectedByAnActiveVariant",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "This figure is still used as the reference of at least "
+                    "one active cultural variant, so it cannot be deleted "
+                    "(ADR 0002). Deal with the variants first — detach or "
+                    "delete them — then delete this record."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "UnexpectedBody",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "This action takes no input. Send no body at all, or an "
+                    "empty JSON object `{}`; any other body is refused rather "
+                    "than ignored."
+                ]
+            },
+        ),
+    ],
+)
+
+RESTORE_INVALID_RESPONSE = OpenApiResponse(
+    response=CreationErrorSerializer,
+    description=(
+        "Nothing was restored: either the record is not deleted — which "
+        "includes repeating a restoration that already succeeded — or it is a "
+        "variant whose reference is still deleted, or the request carried a "
+        "body."
+    ),
+    examples=[
+        OpenApiExample(
+            "NotDeleted",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "This record is not deleted, so there is nothing to "
+                    "restore. Its state is left untouched."
+                ]
+            },
+        ),
+        OpenApiExample(
+            "ReferenceStillDeleted",
+            response_only=True,
+            value={
+                "non_field_errors": [
+                    "This record is a cultural variant of a reference that is "
+                    "itself still deleted. Restore the reference first, so no "
+                    "variant is left pointing at a deleted figure."
+                ]
+            },
         ),
     ],
 )

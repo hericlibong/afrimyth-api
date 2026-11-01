@@ -32,6 +32,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
 from accounts.models import User
+from mythology.deletion import locked_in_pk_order
 from mythology.models import (
     Country,
     CreatureProfile,
@@ -520,6 +521,9 @@ PROFILE_ATTACHMENT_REASON = (
     "The profile is attached to its entity by the server; it cannot name an "
     "entity itself."
 )
+UNSELECTABLE_REFERENCE_MESSAGE = (
+    "No reference figure selectable by this account matches this identifier."
+)
 UNKNOWN_ENTITY_FIELD_REASON = "Unknown input field for entity creation."
 UNKNOWN_PROFILE_FIELD_REASON = "Unknown input field for this profile."
 
@@ -753,10 +757,7 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
             private_entities(roles=roles, caller_id=caller_id).filter(pk=value).first()
         )
         if reference is None:
-            raise serializers.ValidationError(
-                "No reference figure selectable by this account matches this "
-                "identifier."
-            )
+            raise serializers.ValidationError(UNSELECTABLE_REFERENCE_MESSAGE)
         return reference
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -812,6 +813,10 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
 
         try:
             with transaction.atomic():
+                reference = validated_data.get("variant_of")
+                self.require_active_reference(
+                    reference, locked_in_pk_order([getattr(reference, "pk", None)])
+                )
                 entity = create_entity_with_profile(
                     entity_data={
                         **validated_data,
@@ -828,6 +833,23 @@ class PrivateEntityCreateSerializer(serializers.ModelSerializer[Entity]):
                 serializers.as_serializer_error(error)
             ) from error
         return entity
+
+    def require_active_reference(
+        self, reference: Entity | None, locked: Mapping[Any, Entity]
+    ) -> None:
+        """Refuse a reference missing from the locked rows, or deleted there.
+
+        The decision is taken on the locked row, never on the object resolved
+        during field validation: a soft deletion committed in between must be
+        seen rather than overtaken.
+        """
+        if reference is None:
+            return
+        row = locked.get(reference.pk)
+        if row is None or row.deleted_at is not None:
+            raise serializers.ValidationError(
+                {"variant_of": [UNSELECTABLE_REFERENCE_MESSAGE]}
+            )
 
     def caller_account(self) -> User:
         """Return the account this record belongs to, read from the request."""
@@ -999,13 +1021,21 @@ class PrivateEntityUpdateSerializer(PrivateEntityCreateSerializer):
         roles, caller_id = caller_policy(self.context)
         try:
             with transaction.atomic():
+                # La fiche et sa future référence sont prises en une seule
+                # acquisition, ordonnée par clé : deux PATCH croisés ne peuvent
+                # donc pas les verrouiller en sens opposés.
+                reference = validated_data.get("variant_of")
+                locked = locked_in_pk_order(
+                    [instance.pk, getattr(reference, "pk", None)]
+                )
                 # Le droit est réévalué sur la ligne verrouillée : sans cela une
                 # transition concurrente pourrait être écrasée par ce PATCH.
-                entity = Entity.objects.select_for_update().get(pk=instance.pk)
+                entity = locked[instance.pk]
                 if not is_privately_editable(entity, roles=roles, caller_id=caller_id):
                     raise PermissionDenied(NOT_EDITABLE_MESSAGE)
                 # Les rattachements ont pu changer depuis la validation initiale.
                 self.instance = entity
+                self.require_active_reference(reference, locked)
                 self.reject_overlapping_attachments({**validated_data, **collections})
                 for field, value in validated_data.items():
                     setattr(entity, field, value)

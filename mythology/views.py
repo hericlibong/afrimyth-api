@@ -22,6 +22,20 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from accounts.models import User
 from accounts.roles import business_roles
+from mythology.deletion import (
+    DELETED_REFERENCE_MESSAGE,
+    DELETION_ACTIONS,
+    NOT_DELETABLE_MESSAGE,
+    NOT_DELETED_MESSAGE,
+    NOT_RESTORABLE_MESSAGE,
+    PROTECTED_BY_VARIANT_MESSAGE,
+    apply_deletion,
+    apply_restoration,
+    has_active_variant,
+    locked_in_pk_order,
+    may_delete,
+    may_restore,
+)
 from mythology.models import Entity, EntityRelation, EntityType, Source
 from mythology.pagination import EntityPagination
 from mythology.permissions import NOT_EDITABLE_MESSAGE, CanEditEntity, HasBusinessRole
@@ -36,6 +50,8 @@ from mythology.schema import (
     LIST_DESCRIPTION,
     LIST_EXAMPLE,
     LIST_PARAMETERS,
+    NOT_DELETABLE_RESPONSE,
+    NOT_RESTORABLE_RESPONSE,
     PAGE_NOT_FOUND_RESPONSE,
     PRIVATE_CREATE_DESCRIPTION,
     PRIVATE_CREATE_INVALID_RESPONSE,
@@ -62,7 +78,11 @@ from mythology.schema import (
     RELATION_REQUEST_EXAMPLE,
     RELATION_UPDATE_DESCRIPTION,
     REOPEN_DESCRIPTION,
+    RESTORE_DESCRIPTION,
+    RESTORE_INVALID_RESPONSE,
     RESUME_DESCRIPTION,
+    SOFT_DELETE_DESCRIPTION,
+    SOFT_DELETE_INVALID_RESPONSE,
     SOURCE_CREATE_DESCRIPTION,
     SOURCE_DELETE_DESCRIPTION,
     SOURCE_ID_PARAMETER,
@@ -400,7 +420,7 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
                 roles=self.caller_roles, caller_id=self.caller_id
             )
         private = private_entities(roles=self.caller_roles, caller_id=self.caller_id)
-        if self.action in CHILD_ACTIONS | TRANSITION_ACTIONS:
+        if self.action in CHILD_ACTIONS | TRANSITION_ACTIONS | DELETION_ACTIONS:
             return private
         return filter_entities(
             private,
@@ -679,14 +699,18 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
         """
         notes_serializer = DECISION_SERIALIZERS.get(action)
         if notes_serializer is None:
-            if not (isinstance(self.request.data, Mapping) and not self.request.data):
-                raise ValidationError({"non_field_errors": [EMPTY_BODY_MESSAGE]})
+            self.reject_request_body()
             return ""
         serializer = notes_serializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         notes = serializer.validated_data.get("review_notes", "")
         assert isinstance(notes, str)
         return notes
+
+    def reject_request_body(self) -> None:
+        """Refuse any body on an operation that takes no input."""
+        if not (isinstance(self.request.data, Mapping) and not self.request.data):
+            raise ValidationError({"non_field_errors": [EMPTY_BODY_MESSAGE]})
 
     def private_detail_of(self, entity: Entity) -> Response:
         """Render one record with the private detail, references filtered."""
@@ -816,3 +840,95 @@ class PrivateEntityViewSet(mixins.CreateModelMixin, EntityNavigationViewSet):
     def reopen(self, request: Request, **kwargs: Any) -> Response:
         """Reopen a published record as a draft, keeping the last review."""
         return self.run_transition(REOPEN)
+
+    # --- Suppression logique et restauration ----------------------------
+
+    @extend_schema(
+        operation_id="managed_entities_destroy",
+        tags=["management"],
+        summary="Delete one entity logically",
+        description=SOFT_DELETE_DESCRIPTION,
+        request=None,
+        responses={
+            204: None,
+            400: SOFT_DELETE_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: NOT_DELETABLE_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        """Mark one record as deleted, without removing a single row."""
+        entity = self.get_object()
+        with transaction.atomic():
+            # La fiche est verrouillée **avant** la recherche de variantes
+            # actives : toute écriture qui en créerait une attend ce même
+            # verrou, puis constate la suppression.
+            locked = get_object_or_404(
+                private_entities(
+                    roles=self.caller_roles, caller_id=self.caller_id
+                ).select_for_update(),
+                pk=entity.pk,
+            )
+            if not may_delete(
+                locked, roles=self.caller_roles, caller_id=self.caller_id
+            ):
+                raise PermissionDenied(NOT_DELETABLE_MESSAGE)
+            self.reject_request_body()
+            if has_active_variant(locked):
+                raise ValidationError(
+                    {"non_field_errors": [PROTECTED_BY_VARIANT_MESSAGE]}
+                )
+            actor = self.request.user
+            assert isinstance(actor, User)
+            apply_deletion(locked, actor=actor)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        operation_id="managed_entities_restore",
+        tags=["management"],
+        summary="Restore one deleted entity",
+        description=RESTORE_DESCRIPTION,
+        request=None,
+        responses={
+            200: PrivateEntityDetailSerializer,
+            400: RESTORE_INVALID_RESPONSE,
+            401: PRIVATE_UNAUTHENTICATED_RESPONSE,
+            403: NOT_RESTORABLE_RESPONSE,
+            404: PRIVATE_NOT_FOUND_RESPONSE,
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="restore", url_name="restore")
+    def restore(self, request: Request, **kwargs: Any) -> Response:
+        """Clear the deletion marks of one record; administrators only.
+
+        The administrator role is checked **before** any lookup, so no other
+        account learns whether a slug exists among the deleted records. The
+        full manager is used here only, by slug, and never widened to the
+        reads, the updates, the children or the transitions of this view.
+        """
+        if not may_restore(self.caller_roles):
+            raise PermissionDenied(NOT_RESTORABLE_MESSAGE)
+        with transaction.atomic():
+            # Lecture sans verrou, uniquement pour savoir **quelles** lignes
+            # verrouiller, la fiche étant désignée par son slug. Aucun chemin
+            # API ne change le `variant_of` d'une fiche supprimée — le PATCH la
+            # refuse en 404 — donc la paire lue ici est bien celle à prendre.
+            named = get_object_or_404(Entity.objects, slug=self.kwargs["slug"])
+            locked = locked_in_pk_order([named.pk, named.variant_of_id])
+            entity = locked[named.pk]
+            if entity.deleted_at is None:
+                raise ValidationError({"non_field_errors": [NOT_DELETED_MESSAGE]})
+            self.reject_request_body()
+            # Restaurer une variante ne doit pas la laisser pointer vers une
+            # référence encore supprimée. Le contrôle porte sur la ligne
+            # verrouillée ; une référence absente du jeu verrouillé — cas que
+            # l'API ne produit pas — est refusée plutôt que décidée à l'aveugle.
+            if entity.variant_of_id is not None:
+                reference = locked.get(entity.variant_of_id)
+                if reference is None or reference.deleted_at is not None:
+                    raise ValidationError(
+                        {"non_field_errors": [DELETED_REFERENCE_MESSAGE]}
+                    )
+            apply_restoration(entity)
+        return self.private_detail_of(entity)

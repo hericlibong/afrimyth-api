@@ -840,15 +840,14 @@ def test_une_erreur_inattendue_n_est_pas_transformee_en_400(
 
 
 def test_la_vue_privee_n_ouvre_que_les_ecritures_livrees() -> None:
-    """Route creation and the partial update only.
+    """Route creation, the partial update and the logical deletion only.
 
-    A full `ModelViewSet` would have opened replacement and deletion at the
-    same time; this guard is what keeps them closed until their own increments.
+    A full `ModelViewSet` would have opened replacement as well; this guard is
+    what keeps `update` — and therefore `PUT` — closed.
     """
-    assert hasattr(PrivateEntityViewSet, "create")
-    assert hasattr(PrivateEntityViewSet, "partial_update")
-    for action in ("update", "destroy"):
-        assert not hasattr(PrivateEntityViewSet, action), action
+    for action in ("create", "partial_update", "destroy"):
+        assert hasattr(PrivateEntityViewSet, action), action
+    assert not hasattr(PrivateEntityViewSet, "update")
 
 
 def test_la_vue_publique_n_acquiert_aucune_ecriture() -> None:

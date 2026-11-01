@@ -106,8 +106,8 @@ The corpus is served by two distinct pairs of routes, and they never mix.
 
 The private routes are also where a record, its profile, its attachments, its
 documentary sources and its relations are written, and where it is submitted,
-withdrawn, resumed, published, rejected or reopened; the public routes carry no
-write operation at all.
+withdrawn, resumed, published, rejected, reopened, logically deleted and
+restored; the public routes carry no write operation at all.
 
 The public routes behave identically for every caller. A reviewer's or a
 superuser's token changes neither their selection nor their payload: the
@@ -248,7 +248,7 @@ Creating a record happens on the private collection described below.
 
 ## Private editorial API
 
-Sixteen endpoints for editorial work. They require an access token **and**
+Eighteen endpoints for editorial work. They require an access token **and**
 membership of one of three editorial groups.
 
 | Endpoint | Returns |
@@ -260,6 +260,7 @@ membership of one of three editorial groups.
 | six routes under `{slug}/sources/` and `{slug}/relations/` | create, update and delete the record's documentary sources and relations, one row at a time — see below |
 | `POST {slug}/submit/`, `{slug}/withdraw/`, `{slug}/resume/` | submit a draft for review, withdraw a submission, resume a rejected record; answers `200` with the private detail payload |
 | `POST {slug}/publish/`, `{slug}/reject/`, `{slug}/reopen/` | publish or reject a submission, reopen a published record; answers `200` with the private detail payload |
+| `DELETE {slug}/` and `POST {slug}/restore/` | delete one record logically, then restore it; answer `204` and `200` |
 
 ```bash
 curl http://127.0.0.1:8000/api/manage/entities/ \
@@ -272,13 +273,13 @@ Roles are three Django groups — `contributor`, `reviewer` and
 `administrator` — created by a data migration. There is no `role` field on the
 account.
 
-| Caller | Reads on these routes | Creates | Updates | Submits, withdraws, resumes | Moderates |
-|---|---|---|---|---|---|
-| anonymous, or an unusable token | `401` | no | no | no | no |
-| authenticated, no editorial role | `403`, even for a published record | no | no | no | no |
-| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes | its own `draft` and `rejected` | its own records | no |
-| reviewer | every record that has not been deleted | yes | every `draft`, `rejected` and `submitted` | every record, owner or not | publish, reject |
-| administrator, superuser | every record that has not been deleted | yes | every record that has not been deleted | every record, owner or not | publish, reject, reopen |
+| Caller | Reads on these routes | Creates | Updates | Submits, withdraws, resumes | Moderates | Deletes | Restores |
+|---|---|---|---|---|---|---|---|
+| anonymous, or an unusable token | `401` | no | no | no | no | no | no |
+| authenticated, no editorial role | `403`, even for a published record | no | no | no | no | no | no |
+| contributor | every published record, plus its own `draft`, `submitted` and `rejected` | yes | its own `draft` and `rejected` | its own records | no | its own `draft` and `rejected` | no |
+| reviewer | every record that has not been deleted | yes | every `draft`, `rejected` and `submitted` | every record, owner or not | publish, reject | every `draft` and `rejected` | no |
+| administrator, superuser | every record that has not been deleted | yes | every record that has not been deleted | every record, owner or not | publish, reject, reopen | every status | yes |
 
 **Reading does not imply updating.** A contributor reads a published record
 but does not modify it; so does a reviewer. A record this account may read and
@@ -650,12 +651,92 @@ Each decision runs in one transaction, re-reading the visibility, the actor's
 right and the status on the locked row, so two concurrent decisions on the same
 submission cannot both succeed.
 
+### Delete a record logically, and restore it
+
+| Operation | Route | Answers |
+|---|---|---|
+| `DELETE` | `/api/manage/entities/{slug}/` | `204` with no body |
+| `POST` | `/api/manage/entities/{slug}/restore/` | `200` with the private detail payload |
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/api/manage/entities/example-created-hero/ \
+  -H "Authorization: Bearer <access token>"
+
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/restore/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+**The deletion is logical.** Only `deleted_at` and `deleted_by` are written:
+no entity, profile, documentary source, relation or reference attachment row is
+ever removed, so no child is orphaned and a restoration brings the record back
+untouched. This is **not** the `DELETE` of a source or of a relation, which
+really removes that one row.
+
+**Who may delete what** — and it is *not* the update right:
+
+| Caller | Deletes |
+|---|---|
+| contributor | its own `draft` and `rejected` records |
+| reviewer | any `draft` or `rejected` record, owned or not — never a `submitted` or `published` one |
+| administrator, superuser | any status, owned or not |
+
+A reviewer therefore updates a `submitted` record without being able to delete
+it. Restoring is **administrators only**, whatever the status that was kept.
+
+**No input** on either operation: send no body, or an empty JSON object `{}`.
+Any other body returns `400`. The date and the actor come from the server; the
+status, the owner, the submission and review marks, the business fields, the
+profile and the children are all kept.
+
+**An active variant protects its reference.** `DELETE` returns `400` when at
+least one non-deleted figure is a direct cultural variant of this one —
+whatever that variant's status, owner or readability (ADR 0002). The error
+names neither the variants nor their number. A logically deleted variant
+protects nothing, and an ordinary relation never blocks a deletion: only
+`variant_of` does. Detach or delete the variants first.
+
+Symmetrically, restoring a record that is itself a variant whose reference is
+still deleted returns `400`: restore the reference first. No `variant_of` is
+cleared and no other record is restored automatically.
+
+**Once deleted**, the record leaves the public endpoints *and* the ordinary
+private reads — for every role, administrators included — and accepts no
+update, child write or editorial transition: they all answer `404`. Structured
+references pointing at it are hidden by the existing filters, and a hidden
+target's name is never copied into `to_name`.
+
+**Restoring keeps the previous status.** A record deleted while `published`
+**becomes public again** as soon as it is restored; one deleted as a draft,
+submitted or rejected stays private under the usual rights. Restoring is
+neither a reopening nor a new publication: the review marks are preserved and
+the reviewer is never replaced.
+
+| Situation | Response |
+|---|---|
+| Deleted | `204` with no body |
+| Restored | `200` with the private detail payload |
+| Active variant protecting the reference, or a body was sent | `400`, nothing written |
+| Restoring a record that is not deleted, or whose reference is still deleted | `400`, nothing written |
+| No token, or an unusable one | `401` |
+| No editorial role, or a readable record this account may not delete | `403` |
+| Not an administrator, on `restore/` | `403`, for an existing slug exactly as for an unknown one |
+| Unknown slug, unreadable record, or already deleted record, on `DELETE` | `404`, with the same body in all three cases |
+| Unknown slug, on `restore/` | `404` |
+
+Each operation runs in one transaction on the locked row, re-reading the
+visibility, the right, the state and the variant protection there, so a refused
+request leaves every column untouched — `updated_at` included — and two
+concurrent requests cannot overwrite marks already set. Every API write that
+would make a record an active variant takes that same lock, so none can slip a
+live variant under a reference that has just been deleted.
+
 ### The other writes are still refused
 
-`PUT` and `DELETE` are refused with `405` on both private entity URLs, for every
-role, superuser included, and `POST` is refused on the private detail URL. The
-transition and decision routes accept `POST` only. Full replacement and the
-logical deletion or restoration of an entity belong to a later increment.
+`PUT` is refused with `405` on both private entity URLs, for every role,
+superuser included; `POST` is refused on the private detail URL and `DELETE` on
+the collection. The transition, decision and restore routes accept `POST` only.
+Full replacement is not part of the contract, and no operation ever removes an
+entity row physically.
 
 ## Authentication
 
@@ -859,8 +940,8 @@ status. Increment 4B adds the write routes of a record's documentary sources
 and relations, one row at a time, under the same rights. Increment 5 adds the
 submission of a draft, the withdrawal of a submission and the resumption of a
 rejected record. Increment 6 adds the moderation decisions: publishing or
-rejecting a submission, and reopening a published record.
+rejecting a submission, and reopening a published record. Increment 7 adds the
+logical deletion of a record and its restoration.
 
 The public routes stay read-only. Full replacement stays refused, and the
-logical deletion and restoration of an entity, as well as the reclassification
-of an entity's type, are not implemented yet.
+reclassification of an entity's type is not implemented yet.

@@ -92,6 +92,7 @@ def test_schema_generation_does_not_need_published_data(
         "/api/manage/entities/{slug}/publish/",
         "/api/manage/entities/{slug}/reject/",
         "/api/manage/entities/{slug}/reopen/",
+        "/api/manage/entities/{slug}/restore/",
         "/api/auth/token/",
         "/api/auth/token/refresh/",
         "/api/auth/me/",
@@ -121,7 +122,7 @@ def test_redoc_uses_a_pinned_classic_script(client: Client) -> None:
 #: créent aucun contenu.
 WRITABLE_OPERATIONS = {
     "/api/manage/entities/": {"get", "post"},
-    "/api/manage/entities/{slug}/": {"get", "patch"},
+    "/api/manage/entities/{slug}/": {"get", "patch", "delete"},
     "/api/manage/entities/{slug}/sources/": {"post"},
     "/api/manage/entities/{slug}/sources/{source_id}/": {"patch", "delete"},
     "/api/manage/entities/{slug}/relations/": {"post"},
@@ -132,6 +133,7 @@ WRITABLE_OPERATIONS = {
     "/api/manage/entities/{slug}/publish/": {"post"},
     "/api/manage/entities/{slug}/reject/": {"post"},
     "/api/manage/entities/{slug}/reopen/": {"post"},
+    "/api/manage/entities/{slug}/restore/": {"post"},
 }
 
 
@@ -178,6 +180,7 @@ PROTECTED_PATHS = {
     "/api/manage/entities/{slug}/publish/",
     "/api/manage/entities/{slug}/reject/",
     "/api/manage/entities/{slug}/reopen/",
+    "/api/manage/entities/{slug}/restore/",
 }
 
 
@@ -934,14 +937,71 @@ def test_the_global_description_announces_the_moderation(
     )
 
 
-def test_the_deletion_of_an_entity_stays_unavailable(schema: dict[str, Any]) -> None:
-    """Increment 7 must not look delivered."""
-    description = schema["info"]["description"]
-    detail = schema["paths"][PRIVATE_DETAIL]["get"]["description"]
+# --- Soft deletion and restoration --------------------------------------
 
-    assert "logical deletion or restoration of an entity are planned" in description
-    assert "not** part of this" in description
-    assert "deletion and restoration of an entity are not available yet" in detail
+RESTORE_PATH = "/api/manage/entities/{slug}/restore/"
+
+
+def test_the_soft_deletion_declares_its_methods_and_refusals(
+    schema: dict[str, Any],
+) -> None:
+    """The private detail gains `DELETE`, answering 204 without a body."""
+    operation = schema["paths"][PRIVATE_DETAIL]["delete"]
+
+    assert operation["security"] == [{"jwtAuth": []}]
+    assert sorted(operation["responses"]) == ["204", "400", "401", "403", "404"]
+    assert "content" not in operation["responses"]["204"]
+    assert "requestBody" not in operation
+    assert "allowed to delete it" in operation["responses"]["403"]["description"]
+
+
+def test_the_restoration_declares_its_methods_and_refusals(
+    schema: dict[str, Any],
+) -> None:
+    operation = schema["paths"][RESTORE_PATH]["post"]
+
+    assert set(schema["paths"][RESTORE_PATH]) == {"post"}
+    assert operation["security"] == [{"jwtAuth": []}]
+    assert sorted(operation["responses"]) == ["200", "400", "401", "403", "404"]
+    assert "requestBody" not in operation
+    reference = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert reference["$ref"].endswith("/PrivateEntityDetail")
+    assert "not an administrator" in operation["responses"]["403"]["description"]
+
+
+def test_the_soft_deletion_states_what_it_keeps_and_who_may_run_it(
+    schema: dict[str, Any],
+) -> None:
+    """The contract must say it is logical, by whom, and what protects it."""
+    description = schema["paths"][PRIVATE_DETAIL]["delete"]["description"]
+
+    assert "**logically**" in description
+    assert "nothing is physically removed" in description
+    assert "not the right to delete it" in description
+    assert "active** figure is a direct cultural variant" in description
+    assert "names neither the variants nor how many" in description
+    assert "This is not the `DELETE` of a documentary source" in description
+
+
+def test_the_restoration_states_the_kept_status_and_the_variant_order(
+    schema: dict[str, Any],
+) -> None:
+    description = schema["paths"][RESTORE_PATH]["post"]["description"]
+
+    assert "**Administrators only**" in description
+    assert "becomes **public again**" in description
+    assert "neither a reopening nor a new publication" in description
+    assert "reference has to be restored first" in description
+    assert "keep excluding deleted records" in description
+
+
+def test_only_the_full_replacement_stays_unavailable(schema: dict[str, Any]) -> None:
+    """Deletion is delivered; `PUT` is the operation that stays closed."""
+    description = schema["info"]["description"]
+
+    assert "deletes a record logically and restores it" in description
+    assert "full replacement is **not** part of this contract" in description
+    assert "no operation ever removes a row physically" in description
 
 
 def test_the_global_description_keeps_entity_and_submission_limits(
@@ -964,7 +1024,7 @@ def test_the_private_descriptions_no_longer_claim_a_read_only_api(
     assert "`POST` on this collection creates a draft entity" in liste
     assert "`PUT`, `PATCH` and `DELETE` are refused" in liste
     assert "`PATCH` updates this record" in detail
-    assert "`PUT` and `DELETE` are refused" in detail
+    assert "`PUT` is refused" in detail
     for description in (liste, detail):
         assert "Write methods are refused" not in description
 
