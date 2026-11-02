@@ -1,13 +1,4 @@
-"""Import pilote de trois figures réelles du corpus V2.
-
-Pilote volontairement restreint à trois fiches — une par type — afin de
-confronter le modèle à des données réelles avant l'import complet, qui relève
-de la phase 5. Les transformations sont écrites explicitement : il n'y a pas
-de moteur d'import générique, et chaque correspondance est lisible ici.
-
-Le corpus source reste **externe** au dépôt : son chemin est fourni par
-`--input`, aucun chemin absolu n'est codé en dur, et rien n'en est recopié.
-"""
+"""Import pilot figures or the full V2 corpus from an external JSON file."""
 
 from __future__ import annotations
 
@@ -38,9 +29,10 @@ from mythology.services import create_entity_with_profile
 
 # --- Sélection du pilote -------------------------------------------------
 
-#: Les trois seules fiches importées, avec le type attendu. Toute divergence
-#: entre le type du JSON et celui attendu est une erreur : le pilote ne doit
-#: pas importer silencieusement autre chose que ce qui a été validé.
+#: Les trois fiches du pilote, avec le type attendu. Toute divergence entre le
+#: type du JSON et celui attendu est une erreur : le pilote ne doit pas
+#: importer silencieusement autre chose que ce qui a été validé. `--all`
+#: n'utilise pas cette table : il prend les figures du fichier telles quelles.
 PILOT_SELECTION: dict[str, str] = {
     "Oya": EntityType.DIVINITY,
     "Anansi": EntityType.HERO,
@@ -63,22 +55,46 @@ GENDERS: dict[str, str] = {
     "Fluid": Gender.FLUID,
 }
 
-#: Codes ISO 3166-1 alpha-2 des seuls pays rencontrés par le pilote. Table
-#: explicite plutôt que dépendance de géocodage.
+#: Codes ISO 3166-1 alpha-2 des pays nommés par le corpus. Table explicite
+#: plutôt que dépendance de géocodage : chaque entrée est un fait vérifiable,
+#: jamais une déduction. Un nom absent de cette table laisse `iso_code` vide
+#: et produit une note — c'est le cas de `Congo`, dont l'ambiguïté avec `DRC`
+#: demande un arbitrage éditorial.
 COUNTRY_ISO_CODES: dict[str, str] = {
-    "Nigeria": "NG",
+    "Angola": "AO",
+    "Benin": "BJ",
+    "DRC": "CD",
+    "Egypt": "EG",
     "Ghana": "GH",
+    "Haiti": "HT",
+    "Japan": "JP",
+    "Kenya": "KE",
+    "Mali": "ML",
+    "Mozambique": "MZ",
+    "Namibia": "NA",
+    "Nigeria": "NG",
+    "South Africa": "ZA",
+    "Tanzania": "TZ",
+    "Togo": "TG",
+    "Uganda": "UG",
+    "Zambia": "ZM",
+    "Zimbabwe": "ZW",
 }
 
-#: Les quatre grandes régions continentales, préparées même si le pilote n'en
-#: utilise pas toutes, plus la diaspora. `Pan-African` n'est pas créé : aucune
-#: des trois fiches ne le réclame.
+#: Les régions continentales, la diaspora et les portées transrégionales
+#: rencontrées dans le corpus. Les trois `kind` viennent de la décision 3 de
+#: l'ADR 0002 ; aucune aire n'est déduite d'un nom de pays.
 BASE_CULTURAL_AREAS: tuple[tuple[str, str, str | None], ...] = (
     ("West Africa", CulturalAreaKind.AFRICAN_REGION, None),
     ("Central Africa", CulturalAreaKind.AFRICAN_REGION, None),
     ("East Africa", CulturalAreaKind.AFRICAN_REGION, None),
     ("Southern Africa", CulturalAreaKind.AFRICAN_REGION, None),
+    ("North Africa", CulturalAreaKind.AFRICAN_REGION, None),
     ("Diaspora", CulturalAreaKind.DIASPORIC, None),
+    # Portées dépassant une région, et non des régions : `Pan-African` couvre
+    # le continent, `Cross-Regional` une figure partagée par plusieurs régions.
+    ("Pan-African", CulturalAreaKind.TRANSREGIONAL, None),
+    ("Cross-Regional", CulturalAreaKind.TRANSREGIONAL, None),
     # Sous-région précise, rattachée à sa région par `parent`.
     ("Congo Basin", CulturalAreaKind.AFRICAN_REGION, "Central Africa"),
 )
@@ -243,12 +259,13 @@ def reconcile_domains(
 
 
 class Command(BaseCommand):
-    """Importe les trois figures du pilote depuis le corpus V2 externe."""
+    """Import pilot figures or the complete external corpus."""
 
     help = (
-        "Import the three pilot figures (Oya, Anansi, Mokele-mbembe) from an "
-        "external V2 corpus JSON file. Re-running the command never "
-        "duplicates nor overwrites existing entities."
+        "Import figures from an external V2 corpus JSON file: the three pilot "
+        "figures (Oya, Anansi, Mokele-mbembe) by default, or every figure of "
+        "the file with --all. Re-running the command never duplicates nor "
+        "overwrites existing entities."
     )
 
     def add_arguments(self, parser: ArgumentParser) -> None:
@@ -256,6 +273,14 @@ class Command(BaseCommand):
             "--input",
             required=True,
             help="Path to the external mythology_data.json corpus file.",
+        )
+        parser.add_argument(
+            "--all",
+            action="store_true",
+            help=(
+                "Import every figure of the file instead of the three pilot "
+                "figures. The transformations are the same."
+            ),
         )
         parser.add_argument(
             "--dry-run",
@@ -269,14 +294,18 @@ class Command(BaseCommand):
     def handle(self, *args: Any, **options: Any) -> None:
         corpus_path = Path(options["input"])
         dry_run: bool = options["dry_run"]
+        import_all: bool = options["all"]
 
         corpus = self._load_corpus(corpus_path)
-        selected = self._select_pilot(corpus)
+        selected = (
+            self._select_all(corpus) if import_all else self._select_pilot(corpus)
+        )
 
         notes: list[str] = []
         created: list[Entity] = []
         skipped: list[str] = []
         relations_created: list[str] = []
+        deferred_descendants: dict[str, list[str]] = {}
 
         for key, reason in EXCLUDED_SOURCE_KEYS.items():
             notes.append(f"Not imported — {key}: {reason}")
@@ -286,42 +315,68 @@ class Command(BaseCommand):
         # tous les apports de cet appel, référentiels compris.
         with transaction.atomic():
             areas = self._ensure_base_cultural_areas(notes)
-            pilot_by_name: dict[str, Entity] = {}
+            resolvable: dict[str, Entity] = {}
 
-            for name in PILOT_SELECTION:
-                item = selected[name]
+            for name, item in selected.items():
                 existing = self._find_existing(item, name=name)
                 if existing is not None:
-                    pilot_by_name[name] = existing
                     skipped.append(f"{existing.name} ({existing.entity_type})")
                     notes.append(
                         f"{name}: an entity with the same identity already "
                         "exists; skipped without touching its fields, profile "
                         "or collections."
                     )
+                    # Une fiche supprimée logiquement reste hors de l'index :
+                    # l'import ne doit pas en refaire une référence active.
+                    if existing.deleted_at is not None:
+                        notes.append(
+                            f"{name}: the existing entity is logically deleted; "
+                            "left untouched and NOT used to resolve relation "
+                            "targets."
+                        )
+                    else:
+                        resolvable[name] = existing
                     continue
                 entity = self._import_entity(item, name=name, areas=areas, notes=notes)
                 created.append(entity)
-                pilot_by_name[name] = entity
+                resolvable[name] = entity
 
-            # Seconde passe : les relations, une fois toutes les fiches du
-            # pilote créées, afin que les références internes soient
+            # Seconde passe : les relations, une fois toutes les fiches de
+            # l'appel créées, afin que les références internes soient
             # résolvables.
             for entity in created:
-                item = selected[entity.name]
                 relations_created.extend(
                     self._import_relations(
                         entity,
-                        item,
-                        resolvable=pilot_by_name,
+                        selected[entity.name],
+                        resolvable=resolvable,
                         notes=notes,
+                        deferred_descendants=deferred_descendants,
                     )
                 )
+
+            if created:
+                notes.append(
+                    f"{len(created)} entities created as drafts, without owner, "
+                    "review or deletion marks; sources left empty (the corpus "
+                    "carries none)."
+                )
+            if skipped:
+                notes.append(
+                    "Existing entities are reused to resolve the relations of "
+                    "the new ones, but their own fields and links are never "
+                    "updated: upgrading the relations of an earlier import is a "
+                    "separate operation, not a side effect of this one."
+                )
+            self._note_deferred_descendants(deferred_descendants, notes=notes)
 
             if dry_run:
                 transaction.set_rollback(True)
 
         self._report(
+            import_all=import_all,
+            read=len(corpus),
+            selected=len(selected),
             corpus_path=corpus_path,
             dry_run=dry_run,
             created=created,
@@ -366,12 +421,7 @@ class Command(BaseCommand):
                     f"{len(matches)} times."
                 )
             item = matches[0]
-            raw_type = item.get("entity_type")
-            mapped = ENTITY_TYPES.get(str(raw_type))
-            if mapped is None:
-                raise CommandError(
-                    f"{name!r}: unknown entity_type {raw_type!r} in corpus."
-                )
+            mapped = self._mapped_type(item, name=name)
             if mapped != expected_type:
                 raise CommandError(
                     f"{name!r}: expected type {expected_type!r} but corpus says "
@@ -379,6 +429,43 @@ class Command(BaseCommand):
                 )
             selected[name] = item
         return selected
+
+    def _select_all(
+        self, corpus: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Mapping[str, Any]]:
+        """Select named figures with known types and reject duplicate names."""
+        selected: dict[str, Mapping[str, Any]] = {}
+        for position, item in enumerate(corpus, start=1):
+            if not isinstance(item, Mapping):
+                raise CommandError(
+                    f"Corpus entry #{position}: expected a JSON object, got "
+                    f"{type(item).__name__}."
+                )
+            raw_name = item.get("name")
+            name = raw_name.strip() if isinstance(raw_name, str) else ""
+            if not name:
+                raise CommandError(
+                    f"Corpus entry #{position}: missing or empty 'name'; refusing "
+                    "to import an unnamed figure."
+                )
+            if name in selected:
+                raise CommandError(
+                    f"Corpus selection ambiguous: {name!r} appears more than once; "
+                    "refusing to merge or to rename."
+                )
+            self._mapped_type(item, name=name)
+            selected[name] = item
+        if not selected:
+            raise CommandError("Corpus selection empty: the file holds no figure.")
+        return selected
+
+    def _mapped_type(self, item: Mapping[str, Any], *, name: str) -> str:
+        """Map a source type or reject an unknown value."""
+        raw_type = item.get("entity_type")
+        mapped = ENTITY_TYPES.get(str(raw_type))
+        if mapped is None:
+            raise CommandError(f"{name!r}: unknown entity_type {raw_type!r} in corpus.")
+        return mapped
 
     # --- Identité et relance --------------------------------------------
 
@@ -625,10 +712,9 @@ class Command(BaseCommand):
         for domain_name in domains:
             entity.domains.add(self._get_or_create_domain(domain_name, notes=notes))
 
-        notes.append(
-            f"{name}: created as draft, without owner, review or deletion marks; "
-            "sources left empty (the pilot corpus carries none)."
-        )
+        # Pas de note par fiche sur l'état de création : `handle()` en produit
+        # une seule, agrégée, qui dit exactement la même chose sans ajouter
+        # quarante-quatre lignes au bilan.
         return entity
 
     def _resolve_origin(
@@ -805,6 +891,7 @@ class Command(BaseCommand):
         *,
         resolvable: Mapping[str, Entity],
         notes: list[str],
+        deferred_descendants: dict[str, list[str]],
     ) -> list[str]:
         """Crée les relations sortantes de la fiche.
 
@@ -813,11 +900,11 @@ class Command(BaseCommand):
         `descendants` n'est **pas** converti : rien ne garantit qu'un nom cité
         soit un enfant direct plutôt qu'un descendant lointain.
 
-        Seules les références exactes vers les fiches **du pilote** sont
+        Seules les références exactes vers les fiches **de l'appel** sont
         résolues. Aucun rapprochement n'est tenté avec les fiches
-        préexistantes hors sélection. Une cible du pilote déjà présente peut
-        être utilisée après concordance explicite de son nom, type et slug,
-        sans modifier sa fiche ni ses propres liens.
+        préexistantes hors sélection. Une cible de la sélection déjà présente
+        peut être utilisée après concordance explicite de son nom, type et
+        slug, sans modifier sa fiche ni ses propres liens.
         """
         relations = item.get("relations", {}) or {}
         created: list[str] = []
@@ -840,7 +927,7 @@ class Command(BaseCommand):
                     notes.append(
                         f"{entity.name}: relation target {target_name!r} "
                         f"({kind}) left unresolved in `to_name`; no match within "
-                        "the pilot selection, and no fuzzy matching against "
+                        "the selection, and no fuzzy matching against "
                         "pre-existing entities is attempted."
                     )
                 relation = EntityRelation(
@@ -863,13 +950,27 @@ class Command(BaseCommand):
             notes=notes,
         )
         if descendants:
-            notes.append(
-                f"{entity.name}: relations.descendants carries "
-                f"{', '.join(descendants)} — NOT imported. A cited descendant is "
-                "not necessarily a direct child; the direction needs editorial "
-                "arbitration. Information preserved in this report only."
-            )
+            # Accumulés plutôt que notés fiche par fiche : sur le corpus
+            # complet, une note par figure rendrait le bilan illisible.
+            deferred_descendants[entity.name] = descendants
         return created
+
+    def _note_deferred_descendants(
+        self, deferred: Mapping[str, Sequence[str]], *, notes: list[str]
+    ) -> None:
+        """Summarize descendants not converted into relations."""
+        if not deferred:
+            return
+        total = sum(len(names) for names in deferred.values())
+        detail = "; ".join(
+            f"{name} → {', '.join(targets)}" for name, targets in deferred.items()
+        )
+        notes.append(
+            f"relations.descendants: {total} cited names across "
+            f"{len(deferred)} entities were NOT imported. A cited descendant is "
+            "not necessarily a direct child; the direction needs editorial "
+            f"arbitration. Preserved in this report only — {detail}"
+        )
 
     # --- Bilan -----------------------------------------------------------
 
@@ -878,24 +979,34 @@ class Command(BaseCommand):
         *,
         corpus_path: Path,
         dry_run: bool,
+        import_all: bool,
+        read: int,
+        selected: int,
         created: Sequence[Entity],
         skipped: Sequence[str],
         relations_created: Sequence[str],
         notes: Sequence[str],
     ) -> None:
+        resolved = sum(1 for label in relations_created if "(unresolved)" not in label)
         write = self.stdout.write
         write("=" * 72)
-        write("Pilot import summary")
+        write("Full corpus import summary" if import_all else "Pilot import summary")
         write("=" * 72)
         write(f"Corpus          : {corpus_path}")
         write(f"Mode            : {'DRY RUN (rolled back)' if dry_run else 'COMMIT'}")
+        write(f"Selection       : {'--all' if import_all else 'pilot (3 figures)'}")
+        write(f"Figures read    : {read}")
+        write(f"Figures selected: {selected}")
         write(f"Entities created: {len(created)}")
         for entity in created:
             write(f"  + {entity.name} ({entity.entity_type}) slug={entity.slug}")
         write(f"Entities skipped: {len(skipped)}")
         for label in skipped:
             write(f"  = {label}")
-        write(f"Relations       : {len(relations_created)}")
+        write(
+            f"Relations       : {len(relations_created)} "
+            f"({resolved} resolved, {len(relations_created) - resolved} cited by name)"
+        )
         for label in relations_created:
             write(f"  → {label}")
         write(f"Notes           : {len(notes)}")

@@ -22,6 +22,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from mythology.management.commands.import_mythology_pilot import (
     clean_list,
@@ -1091,3 +1092,380 @@ def test_fiche_importee_se_serialise_sans_requete(
     assert payload["name"] == "Oya"
     assert payload["relations"][0]["to_entity"]["slug"] == "anansi"
     assert len(payload["domains"]) == 2
+
+
+# --- Option `--all` : corpus complet ------------------------------------
+#
+# Les cas ci-dessous reprennent les constructeurs du pilote plutôt que de
+# recopier des fiches : seules les différences réellement rencontrées dans
+# les 44 figures du corpus V2 sont représentées — aires culturelles au-delà
+# des quatre régions du pilote, pays sans code ISO retenu, cibles de relation
+# hors fichier, et volume suffisant pour que le bilan reste lisible.
+
+
+def extra_divinity(name: str, **overrides: Any) -> dict[str, Any]:
+    return synthetic_divinity(name=name, **overrides)
+
+
+def corpus_with_extras(tmp_path: Path, *extras: dict[str, Any]) -> str:
+    return write_corpus(
+        tmp_path,
+        [synthetic_divinity(), synthetic_hero(), synthetic_creature(), *extras],
+    )
+
+
+def test_all_importe_toutes_les_figures_du_fichier(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path, extra_divinity("Olokun"), extra_divinity("Nyame")
+    )
+
+    call_command("import_mythology_pilot", input=corpus, all=True)
+
+    assert Entity.objects.count() == 5
+    assert set(Entity.objects.values_list("slug", flat=True)) == {
+        "oya",
+        "anansi",
+        "mokele-mbembe",
+        "olokun",
+        "nyame",
+    }
+    # Garanties du pilote inchangées : brouillon, sans propriétaire ni revue.
+    for entity in Entity.objects.all():
+        assert entity.status == EntityStatus.DRAFT
+        assert entity.created_by_id is None
+        assert entity.reviewed_by_id is None
+        assert entity.submitted_at is None
+        assert entity.deleted_at is None
+    # Un profil, et exactement celui du type.
+    assert DivinityProfile.objects.count() == 3
+    assert HeroProfile.objects.count() == 1
+    assert CreatureProfile.objects.count() == 1
+
+
+def test_sans_all_le_pilote_reste_inchange(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path, extra_divinity("Olokun"), extra_divinity("Nyame")
+    )
+
+    call_command("import_mythology_pilot", input=corpus)
+
+    assert set(Entity.objects.values_list("slug", flat=True)) == {
+        "oya",
+        "anansi",
+        "mokele-mbembe",
+    }
+
+
+def test_all_resout_les_relations_entre_figures_hors_pilote(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Olokun",
+            relations={"parents": ["Nyame"], "conjoint": ["Oya"], "descendants": []},
+        ),
+        extra_divinity("Nyame"),
+    )
+
+    call_command("import_mythology_pilot", input=corpus, all=True)
+
+    olokun = Entity.objects.get(slug="olokun")
+    parent = EntityRelation.objects.get(from_entity=olokun, kind=RelationKind.PARENT)
+    consort = EntityRelation.objects.get(from_entity=olokun, kind=RelationKind.CONSORT)
+    assert parent.to_entity is not None
+    assert parent.to_entity.slug == "nyame"
+    assert parent.to_name == ""
+    assert consort.to_entity is not None
+    assert consort.to_entity.slug == "oya"
+
+
+def test_all_preserve_une_cible_absente_du_fichier_sous_to_name(
+    tmp_path: Path,
+) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Nyame",
+            relations={"parents": ["Olokun"], "conjoint": [], "descendants": []},
+        ),
+    )
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+
+    relation = EntityRelation.objects.get(from_entity__slug="nyame")
+    assert relation.to_entity is None
+    assert relation.to_name == "Olokun"
+    assert "unresolved" in output.getvalue()
+    # Aucune fiche fantôme n'a été créée pour accueillir la cible.
+    assert not Entity.objects.filter(slug="olokun").exists()
+
+
+def test_all_couvre_les_aires_culturelles_au_dela_des_regions_du_pilote(
+    tmp_path: Path,
+) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Nyame",
+            origin={
+                "country": "Egypt",
+                "ethnicity": "Akan",
+                "pantheon": "Synthetic pantheon",
+                "cultural_region": "North Africa",
+            },
+        ),
+        extra_divinity(
+            "Olokun",
+            origin={
+                "country": "Nigeria",
+                "ethnicity": "Yoruba",
+                "pantheon": "Synthetic pantheon",
+                "cultural_region": "Pan-African",
+            },
+        ),
+    )
+
+    call_command("import_mythology_pilot", input=corpus, all=True)
+
+    north = CulturalArea.objects.get(name="North Africa")
+    assert north.kind == CulturalAreaKind.AFRICAN_REGION
+    # `Pan-African` et `Cross-Regional` sont des portées, pas des régions.
+    for name in ("Pan-African", "Cross-Regional"):
+        area = CulturalArea.objects.get(name=name)
+        assert area.kind == CulturalAreaKind.TRANSREGIONAL
+    basin = CulturalArea.objects.get(name="Congo Basin")
+    assert basin.parent is not None
+    assert basin.parent.name == "Central Africa"
+    assert Entity.objects.get(slug="nyame").primary_cultural_area == north
+
+
+def test_all_applique_les_codes_iso_connus_et_signale_les_autres(
+    tmp_path: Path,
+) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Nyame",
+            origin={
+                "country": "Congo",
+                "ethnicity": "Akan",
+                "pantheon": "Synthetic pantheon",
+                "cultural_region": "Central Africa",
+            },
+        ),
+    )
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+
+    assert Country.objects.get(name="Nigeria").iso_code == "NG"
+    assert Country.objects.get(name="Congo").iso_code == ""
+    assert "Congo" in output.getvalue()
+
+
+def test_all_refuse_une_figure_sans_nom(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(tmp_path, extra_divinity("   "))
+
+    with pytest.raises(CommandError, match="missing or empty"):
+        call_command("import_mythology_pilot", input=corpus, all=True)
+
+    assert Entity.objects.count() == 0
+
+
+def test_all_refuse_un_nom_duplique_dans_le_fichier(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(tmp_path, extra_divinity("Oya"))
+
+    with pytest.raises(CommandError, match="appears more than once"):
+        call_command("import_mythology_pilot", input=corpus, all=True)
+
+    assert Entity.objects.count() == 0
+
+
+def test_all_refuse_un_type_inconnu(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path, extra_divinity("Nyame", entity_type="Trickster")
+    )
+
+    with pytest.raises(CommandError, match="unknown entity_type"):
+        call_command("import_mythology_pilot", input=corpus, all=True)
+
+    assert Entity.objects.count() == 0
+
+
+def test_all_refuse_un_fichier_sans_figure(tmp_path: Path) -> None:
+    corpus = write_corpus(tmp_path, [])
+
+    with pytest.raises(CommandError, match="selection empty"):
+        call_command("import_mythology_pilot", input=corpus, all=True)
+
+
+def test_all_annule_tous_les_apports_sur_une_erreur_tardive(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Nyame",
+            identity={
+                "gender": "Plasma",
+                "cultural_role": "Synthetic role",
+                "alignment": "Lawful Neutral",
+            },
+        ),
+    )
+
+    with pytest.raises(CommandError, match="unknown gender"):
+        call_command("import_mythology_pilot", input=corpus, all=True)
+
+    assert Entity.objects.count() == 0
+    assert EntityRelation.objects.count() == 0
+    assert Country.objects.count() == 0
+    assert Ethnicity.objects.count() == 0
+    assert Domain.objects.count() == 0
+    assert CulturalArea.objects.count() == 0
+    assert DivinityProfile.objects.count() == 0
+
+
+def test_all_en_dry_run_ne_persiste_rien(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path, extra_divinity("Olokun"), extra_divinity("Nyame")
+    )
+    output = StringIO()
+
+    call_command(
+        "import_mythology_pilot", input=corpus, all=True, dry_run=True, stdout=output
+    )
+
+    assert Entity.objects.count() == 0
+    assert CulturalArea.objects.count() == 0
+    assert Domain.objects.count() == 0
+    report = output.getvalue()
+    assert "DRY RUN (rolled back)" in report
+    # Le bilan reste celui d'un import complet, avec ses décomptes réels.
+    assert "Entities created: 5" in report
+
+
+def test_all_relance_sans_doublon_et_preserve_les_fiches_existantes(
+    tmp_path: Path, django_user_model: Any
+) -> None:
+    corpus = corpus_with_extras(tmp_path, extra_divinity("Nyame"))
+    call_command("import_mythology_pilot", input=corpus, all=True)
+
+    owner = django_user_model.objects.create_user(username="editeur")
+    oya = Entity.objects.get(slug="oya")
+    oya.status = EntityStatus.PUBLISHED
+    oya.created_by = owner
+    oya.review_notes = "Revue éditoriale à conserver."
+    oya.cultural_role = "Role corrige en revue."
+    oya.save()
+    oya.domains.clear()
+    before = {
+        entity.pk: (entity.status, entity.created_by_id, entity.updated_at)
+        for entity in Entity.objects.all()
+    }
+    relations_before = EntityRelation.objects.count()
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+
+    assert Entity.objects.count() == len(before)
+    assert EntityRelation.objects.count() == relations_before
+    after = Entity.objects.get(slug="oya")
+    assert after.status == EntityStatus.PUBLISHED
+    assert after.created_by_id == owner.pk
+    assert after.review_notes == "Revue éditoriale à conserver."
+    assert after.cultural_role == "Role corrige en revue."
+    # Ni restauration des domaines retirés, ni réécriture d'un champ.
+    assert after.domains.count() == 0
+    for entity in Entity.objects.all():
+        assert before[entity.pk] == (
+            entity.status,
+            entity.created_by_id,
+            entity.updated_at,
+        )
+    report = output.getvalue()
+    assert "Entities created: 0" in report
+    assert "already exists" in report
+
+
+def test_all_ne_reutilise_pas_une_fiche_supprimee_comme_cible(tmp_path: Path) -> None:
+    deleted = create_entity(
+        name="Nyame",
+        slug="nyame",
+        deleted_at=timezone.now(),
+        status=EntityStatus.DRAFT,
+    )
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Olokun",
+            relations={"parents": ["Nyame"], "conjoint": [], "descendants": []},
+        ),
+        extra_divinity("Nyame"),
+    )
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+
+    relation = EntityRelation.objects.get(from_entity__slug="olokun")
+    assert relation.to_entity is None
+    assert relation.to_name == "Nyame"
+    reloaded = Entity.objects.get(pk=deleted.pk)
+    assert reloaded.deleted_at is not None
+    assert Entity.objects.filter(slug="nyame").count() == 1
+    assert "logically deleted" in output.getvalue()
+
+
+def test_all_resume_les_descendants_en_une_seule_note(tmp_path: Path) -> None:
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Nyame",
+            relations={"parents": [], "conjoint": [], "descendants": ["Olokun"]},
+        ),
+        extra_divinity(
+            "Olokun",
+            relations={"parents": [], "conjoint": [], "descendants": ["Nyame", "Oya"]},
+        ),
+    )
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+
+    lines = [
+        line
+        for line in output.getvalue().splitlines()
+        if "relations.descendants:" in line
+    ]
+    assert len(lines) == 1
+    assert "3 cited names across 2 entities were NOT imported" in lines[0]
+    # Aucun lien n'a été créé dans un sens non garanti par la source.
+    assert EntityRelation.objects.count() == 0
+
+
+def test_all_affiche_un_bilan_lisible(tmp_path: Path) -> None:
+    create_entity(name="Nyame", slug="nyame")
+    corpus = corpus_with_extras(
+        tmp_path,
+        extra_divinity(
+            "Olokun",
+            relations={
+                "parents": ["Oya"],
+                "conjoint": ["Mami Wata"],
+                "descendants": [],
+            },
+        ),
+        extra_divinity("Nyame"),
+    )
+    output = StringIO()
+
+    call_command("import_mythology_pilot", input=corpus, all=True, stdout=output)
+    report = output.getvalue()
+
+    assert "Full corpus import summary" in report
+    assert "Selection       : --all" in report
+    assert "Figures read    : 5" in report
+    assert "Figures selected: 5" in report
+    assert "Entities created: 4" in report
+    assert "Relations       : 2 (1 resolved, 1 cited by name)" in report
+    # Les exclusions restent annoncées, y compris en import complet.
+    assert "rendering" in report
+    assert "origin.pantheon" in report
