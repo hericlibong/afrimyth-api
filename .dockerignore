@@ -1,0 +1,60 @@
+# Contexte de construction : seul le code de l'application entre dans l'image.
+
+# --- Secrets et environnements réels ---
+# Exclus sans exception, y compris `.env.docker` : les variables arrivent par
+# `env_file` au démarrage, jamais par une copie dans une couche d'image.
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# --- Environnement virtuel et caches ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Historique et outillage ---
+.git/
+.gitignore
+.github/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# --- Documentation interne, rapports et prompts ---
+# Inutiles au service, et les rapports citent des chemins locaux.
+docs/
+AGENTS.md
+CLAUDE.md
+README.md
+
+# --- Tests ---
+# L'image sert l'application ; la suite s'exécute dans l'environnement local.
+tests/
+mythology/tests/
+accounts/tests/
+pyproject.toml
+requirements-dev.txt
+
+# --- Sorties et données locales ---
+staticfiles/
+media/
+*.log
+*.dump
+db.sqlite3
+db.sqlite3-journal
+
+# --- Fichiers Docker eux-mêmes ---
+Dockerfile
+docker-compose.yml
+.dockerignore

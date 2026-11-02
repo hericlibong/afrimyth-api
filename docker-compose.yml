@@ -1,0 +1,62 @@
+# Démarrage local : deux services, l'API Django et PostgreSQL. Rien d'autre.
+# Pas de reverse proxy, pas de file de tâches, pas de cache : ce fichier
+# décrit une installation de développement reproductible, pas une production.
+#
+# Nom de projet explicite : les conteneurs, le réseau et le volume sont
+# distincts du PostgreSQL installé sur Windows et de la base des exercices.
+name: afrimyth-docker
+
+services:
+  db:
+    image: postgres:16
+    # Version déjà employée par le projet. Le port n'est pas publié sur
+    # l'hôte : seul le réseau Compose atteint cette base, et le PostgreSQL
+    # local de Windows garde 5432 pour lui.
+    env_file:
+      - .env.docker
+    volumes:
+      - afrimyth-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Mécanisme fourni par l'image, plutôt qu'une boucle d'attente maison.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready --username=\"$$POSTGRES_USER\" --dbname=\"$$POSTGRES_DB\"",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+    env_file:
+      - .env.docker
+    environment:
+      # L'hôte de la base est imposé ici, et non dans le fichier
+      # d'environnement : c'est le nom du service sur le réseau Compose.
+      # Ni `localhost`, ni `host.docker.internal` — le conteneur ne doit
+      # jamais atteindre le PostgreSQL de Windows.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    ports:
+      # 8001 sur la boucle locale uniquement : l'API des exercices garde 8000.
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      db:
+        # Attente bornée par le healthcheck ci-dessus : l'API ne démarre pas
+        # avant que PostgreSQL réponde réellement.
+        condition: service_healthy
+    # Migrations appliquées avant le service HTTP. `migrate` est idempotent :
+    # un redémarrage ne réinitialise rien et ne recrée aucune donnée.
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8000"
+    restart: unless-stopped
+
+volumes:
+  # Volume nommé et propre à ce projet : les données survivent à un
+  # `docker compose down` et ne touchent pas la base locale `afrimyth`.
+  afrimyth-db-data:

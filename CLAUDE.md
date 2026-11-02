@@ -89,7 +89,14 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 
 ## Hors périmètre à ce stade
 
-Docker, CI.
+CI et couverture.
+
+**Docker.** Autorisé depuis l'incrément 1 de la phase 6, pour le seul
+démarrage local : `Dockerfile`, `docker-compose.yml`, `.dockerignore` et
+`.env.docker.example`, deux services — API Django et PostgreSQL 16 — avec le
+serveur de développement de Django, l'API publiée sur `127.0.0.1:8001` et un
+volume propre. Restent hors périmètre le déploiement en production, un
+serveur WSGI, un reverse proxy, Kubernetes, Celery et Redis.
 
 **Authentification.** JWT est en place depuis la phase 4 : trois routes sous
 `/api/auth/` (obtention, renouvellement, identité), par Simple JWT. Restent

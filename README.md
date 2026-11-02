@@ -47,6 +47,64 @@ python manage.py runserver
 The health endpoint is then available at
 <http://127.0.0.1:8000/api/health/> and returns `{"status": "ok"}`.
 
+## Running with Docker
+
+An alternative local setup, with two containers: the Django API and
+PostgreSQL 16. It is **self-contained** — it never connects to a PostgreSQL
+instance installed on the host, and it uses its own database, its own volume
+and its own environment file. The local setup above is unaffected.
+
+This setup runs the **Django development server**. It is meant for local work
+only and makes no production promise: no reverse proxy, no WSGI server, no
+task queue.
+
+**Requirements.** Docker Desktop with its Linux engine running, which provides
+both `docker` and `docker compose`.
+
+**Prepare the local environment file.** Copy the example and replace its
+values; the real file is ignored by Git and never enters the image:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+**Start.** The database host is the Compose service name, so no host port is
+needed for PostgreSQL — it is deliberately not published:
+
+```bash
+docker compose --env-file .env.docker up -d --build
+```
+
+Compose waits for the database healthcheck, applies the migrations, then
+starts the HTTP service. The API listens on <http://127.0.0.1:8001>, so the
+local setup keeps port 8000 for itself:
+
+- health — <http://127.0.0.1:8001/api/health/>
+- Swagger UI — <http://127.0.0.1:8001/api/docs/>
+- OpenAPI schema — <http://127.0.0.1:8001/api/schema/>
+- public collection — <http://127.0.0.1:8001/api/entities/>
+
+**Expect an empty database.** No account and no corpus are created on
+startup. The public collection therefore returns zero results until content
+is imported and published, through the commands below, run manually.
+
+**Stop**, keeping the data of the volume:
+
+```bash
+docker compose --env-file .env.docker down
+```
+
+The named volume survives, so restarting keeps the tables and the applied
+migrations. Adding `-v` would delete the database — do not use it to stop the
+services.
+
+**Optional administrative access.** Create an account manually when you need
+one; nothing creates it for you:
+
+```bash
+docker compose --env-file .env.docker exec api python manage.py createsuperuser
+```
+
 ## API documentation
 
 Three routes serve the same generated OpenAPI schema. All are readable
