@@ -1,5 +1,10 @@
 # Afrimyth API
 
+[![CI](https://github.com/hericlibong/afrimyth-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hericlibong/afrimyth-api/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](docs/installation.md)
+[![Django](https://img.shields.io/badge/Django-5.2-092E20)](docs/development.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/hericlibong/afrimyth-api/tree/v1.0.0)
+
 Afrimyth is a cultural project with an encyclopedic purpose. It documents
 divinities, heroes and creatures from African and diasporic mythologies,
 along with their stories, cultural contexts, relationships and sources.
