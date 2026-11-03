@@ -1,9 +1,9 @@
-"""Tests des variantes culturelles et des relations entre figures.
+"""Tests of the cultural variants and of the relations between figures.
 
-Chaque règle est testée à la portée où elle s'applique réellement : les
-contraintes de base par un `save()` direct attendant une `IntegrityError`, les
-validations de formulaire par `full_clean()` attendant une `ValidationError`.
-Les deux ne protègent pas les mêmes chemins d'écriture.
+Each rule is tested at the scope where it really applies: the database
+constraints through a direct `save()` expecting an `IntegrityError`, the
+form validations through `full_clean()` expecting a `ValidationError`.
+The two do not protect the same write paths.
 """
 
 import pytest
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_variante_est_une_entite_autonome() -> None:
-    """La variante ne reçoit rien de sa référence : ni textes, ni rattachements."""
+    """The variant inherits nothing from its reference: no text, no attachment."""
     reference = create_entity(name="Mami Wata", slug="mami-wata")
     variante = create_entity(
         name="Mami Wata (Caribbean)",
@@ -44,10 +44,10 @@ def test_variante_est_une_entite_autonome() -> None:
 
 
 def test_variante_peut_avoir_un_autre_type() -> None:
-    """Aucune contrainte d'égalité des types n'est posée.
+    """No constraint of type equality is enforced.
 
-    Une forme régionale peut être une divinité là où la figure de référence
-    est une créature, conformément à la décision 3 de l'ADR 0002.
+    A regional form may be a divinity where the reference figure is a
+    creature, as stated by decision 3 of ADR 0002.
     """
     creature = create_creature(name="Mami Wata", slug="mami-wata")
     divinite = create_entity(
@@ -64,7 +64,7 @@ def test_variante_peut_avoir_un_autre_type() -> None:
 
 
 def test_variant_of_est_facultatif() -> None:
-    """Une entité sans référence reste valide."""
+    """An entity without a reference stays valid."""
     entity = create_entity()
 
     entity.full_clean()
@@ -74,7 +74,7 @@ def test_variant_of_est_facultatif() -> None:
 
 
 def test_auto_reference_refusee_par_full_clean() -> None:
-    """`full_clean()` donne un message lisible plutôt qu'une erreur de base."""
+    """`full_clean()` gives a readable message rather than a database error."""
     entity = create_entity()
     entity.variant_of = entity
 
@@ -85,10 +85,9 @@ def test_auto_reference_refusee_par_full_clean() -> None:
 
 
 def test_auto_reference_refusee_en_base() -> None:
-    """La `CheckConstraint` arrête aussi un `save()` direct.
+    """The `CheckConstraint` also stops a direct `save()`.
 
-    C'est la seule garantie réelle : elle s'applique sans passer par un
-    formulaire.
+    This is the only real guarantee: it applies without going through a form.
     """
     entity = create_entity()
     entity.variant_of = entity
@@ -98,7 +97,7 @@ def test_auto_reference_refusee_en_base() -> None:
 
 
 def test_suppression_d_une_reference_est_protegee() -> None:
-    """`PROTECT` empêche la suppression physique d'une figure citée."""
+    """`PROTECT` prevents the physical deletion of a cited figure."""
     reference = create_entity(name="Mami Wata", slug="mami-wata")
     create_entity(
         name="Mami Wata (Caribbean)",
@@ -113,11 +112,11 @@ def test_suppression_d_une_reference_est_protegee() -> None:
 
 
 def test_cycle_indirect_de_variantes_n_est_pas_detecte() -> None:
-    """Documente une limite assumée : A → B → A n'est pas refusé.
+    """Document an accepted limit: A to B to A is not refused.
 
-    Seule l'auto-référence directe est interdite. Détecter les cycles
-    indirects demanderait un parcours récursif, hors périmètre. Ce test fixe
-    le comportement réel pour qu'il soit constaté, non découvert plus tard.
+    Only the direct self-reference is forbidden. Detecting indirect cycles
+    would require a recursive traversal, out of scope. This test pins the real
+    behaviour down so that it is observed, not discovered later.
     """
     a = create_entity(name="A", slug="a")
     b = create_entity(name="B", slug="b", variant_of=a)
@@ -134,10 +133,10 @@ def test_cycle_indirect_de_variantes_n_est_pas_detecte() -> None:
 
 
 def test_sens_de_lecture_de_la_relation() -> None:
-    """`A — parent → B` signifie « B est un parent de A ».
+    """`A - parent -> B` means that B is a parent of A.
 
-    Ce test est le garde-fou contre une inversion à l'import : s'il échoue,
-    c'est que le sens a été retourné quelque part.
+    This test is the safeguard against a reversal at import time: if it
+    fails, the direction has been flipped somewhere.
     """
     enfant = create_entity(name="Shango", slug="shango")
     pere = create_entity(name="Oranyan", slug="oranyan")
@@ -153,7 +152,7 @@ def test_sens_de_lecture_de_la_relation() -> None:
 
 
 def test_aucune_relation_inverse_n_est_creee() -> None:
-    """Un `parent` ne génère pas de `child`, ni un allié sa réciproque."""
+    """A `parent` generates no `child`, and an ally no counterpart."""
     a = create_entity(name="A", slug="a")
     b = create_entity(name="B", slug="b")
 
@@ -168,7 +167,7 @@ def test_aucune_relation_inverse_n_est_creee() -> None:
 
 
 def test_relation_vers_une_fiche_existante() -> None:
-    """Une cible résolue laisse `to_name` vide."""
+    """A resolved target leaves `to_name` empty."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
 
@@ -179,10 +178,10 @@ def test_relation_vers_une_fiche_existante() -> None:
 
 
 def test_relation_vers_une_figure_sans_fiche() -> None:
-    """Une cible citée conserve son nom brut, sans fiche.
+    """A cited target keeps its raw name, without a record.
 
-    C'est le cas majoritaire du corpus V2 : les noms cités désignent souvent
-    des figures absentes.
+    This is the majority case of the V2 corpus: the names cited often
+    designate absent figures.
     """
     source = create_entity()
 
@@ -194,10 +193,10 @@ def test_relation_vers_une_figure_sans_fiche() -> None:
 
 
 def test_aucun_rapprochement_automatique_par_nom() -> None:
-    """Créer la fiche homonyme ne résout pas le lien existant.
+    """Creating the homonymous record does not resolve the existing link.
 
-    Aucune résolution par nom n'est tentée : les noms sont ambigus, et une
-    fusion automatique serait une perte de donnée.
+    No resolution by name is attempted: names are ambiguous, and an automatic
+    merge would be a loss of data.
     """
     source = create_entity(name="A", slug="a")
     lien = create_relation(source, RelationKind.PARENT, to_name="Yemoja")
@@ -213,7 +212,7 @@ def test_aucun_rapprochement_automatique_par_nom() -> None:
 
 
 def test_deux_cibles_refusees_en_base() -> None:
-    """La contrainte interdit une fiche *et* un nom."""
+    """The constraint forbids a record *and* a name."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
 
@@ -222,7 +221,7 @@ def test_deux_cibles_refusees_en_base() -> None:
 
 
 def test_aucune_cible_refusee_en_base() -> None:
-    """La contrainte interdit l'absence des deux."""
+    """The constraint forbids the absence of both."""
     source = create_entity()
 
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -230,7 +229,7 @@ def test_aucune_cible_refusee_en_base() -> None:
 
 
 def test_deux_cibles_refusees_par_full_clean() -> None:
-    """`full_clean()` signale le même cas avec un message de formulaire."""
+    """`full_clean()` reports the same case with a form message."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
     lien = EntityRelation(
@@ -247,7 +246,7 @@ def test_deux_cibles_refusees_par_full_clean() -> None:
 
 
 def test_aucune_cible_refusee_par_full_clean() -> None:
-    """Même chose pour une relation sans cible du tout."""
+    """Same for a relation with no target at all."""
     lien = EntityRelation(from_entity=create_entity(), kind=RelationKind.PARENT)
 
     with pytest.raises(ValidationError) as excinfo:
@@ -257,10 +256,10 @@ def test_aucune_cible_refusee_par_full_clean() -> None:
 
 
 def test_nom_compose_d_espaces_refuse_par_full_clean() -> None:
-    """Un nom blanc est traité comme une absence de cible.
+    """A blank name is treated as a missing target.
 
-    Cette règle n'existe que dans `clean()` : `"   "` n'est pas la chaîne
-    vide, donc la contrainte de base le laisserait passer.
+    This rule lives in `clean()` only: a blank-filled string is not the empty
+    string, so the database constraint would let it through.
     """
     lien = EntityRelation(
         from_entity=create_entity(),
@@ -275,7 +274,7 @@ def test_nom_compose_d_espaces_refuse_par_full_clean() -> None:
 
 
 def test_nom_cible_est_normalise_par_clean() -> None:
-    """`clean()` retire les espaces de bord d'un nom valide."""
+    """`clean()` strips the edge whitespace of a valid name."""
     lien = EntityRelation(
         from_entity=create_entity(),
         kind=RelationKind.PARENT,
@@ -291,7 +290,7 @@ def test_nom_cible_est_normalise_par_clean() -> None:
 
 
 def test_auto_lien_resolu_refuse_en_base() -> None:
-    """Une entité ne peut pas être liée à elle-même par une cible résolue."""
+    """An entity cannot be linked to itself through a resolved target."""
     entity = create_entity()
 
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -299,7 +298,7 @@ def test_auto_lien_resolu_refuse_en_base() -> None:
 
 
 def test_auto_lien_resolu_refuse_par_full_clean() -> None:
-    """`full_clean()` donne le message correspondant."""
+    """`full_clean()` gives the matching message."""
     entity = create_entity()
     lien = EntityRelation(from_entity=entity, kind=RelationKind.ALLY, to_entity=entity)
 
@@ -310,7 +309,7 @@ def test_auto_lien_resolu_refuse_par_full_clean() -> None:
 
 
 def test_doublon_de_lien_resolu_refuse() -> None:
-    """`(from_entity, to_entity, kind)` est unique pour les liens résolus."""
+    """`(from_entity, to_entity, kind)` is unique for resolved links."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
     create_relation(source, RelationKind.PARENT, to_entity=cible)
@@ -320,7 +319,7 @@ def test_doublon_de_lien_resolu_refuse() -> None:
 
 
 def test_doublon_de_lien_non_resolu_refuse() -> None:
-    """`(from_entity, to_name, kind)` est unique pour les liens cités."""
+    """`(from_entity, to_name, kind)` is unique for cited links."""
     source = create_entity()
     create_relation(source, RelationKind.PARENT, to_name="Yemoja")
 
@@ -329,7 +328,7 @@ def test_doublon_de_lien_non_resolu_refuse() -> None:
 
 
 def test_plusieurs_types_pour_une_meme_paire() -> None:
-    """Seul le triplet est unique : une paire peut porter plusieurs types."""
+    """Only the triple is unique: a pair may carry several kinds."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
 
@@ -341,7 +340,7 @@ def test_plusieurs_types_pour_une_meme_paire() -> None:
 
 
 def test_meme_nom_cite_sous_deux_types() -> None:
-    """La même unicité s'applique aux liens cités, par type."""
+    """The same uniqueness applies to cited links, per kind."""
     source = create_entity()
 
     create_relation(source, RelationKind.PARENT, to_name="Yemoja")
@@ -351,7 +350,7 @@ def test_meme_nom_cite_sous_deux_types() -> None:
 
 
 def test_deux_sources_peuvent_citer_le_meme_nom() -> None:
-    """L'unicité est portée par la source, pas par le nom seul."""
+    """Uniqueness is carried by the source, not by the name alone."""
     a = create_entity(name="A", slug="a")
     b = create_entity(name="B", slug="b")
 
@@ -365,7 +364,7 @@ def test_deux_sources_peuvent_citer_le_meme_nom() -> None:
 
 
 def test_suppression_de_la_source_supprime_ses_liens() -> None:
-    """`CASCADE` sur `from_entity` : les liens sortants disparaissent."""
+    """`CASCADE` on `from_entity`: the outgoing links disappear."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
     create_relation(source, RelationKind.PARENT, to_entity=cible)
@@ -377,11 +376,11 @@ def test_suppression_de_la_source_supprime_ses_liens() -> None:
 
 
 def test_suppression_de_la_cible_supprime_le_lien() -> None:
-    """`CASCADE` sur `to_entity` : le lien disparaît avec la cible.
+    """`CASCADE` on `to_entity`: the link disappears with the target.
 
-    Portée à connaître : une suppression **physique** d'une cible efface les
-    liens qui la citaient, sans les dégrader en `to_name`. L'API V1 utilisera
-    la suppression logique, non implémentée dans cet incrément.
+    A scope worth knowing: a **physical** deletion of a target erases the
+    links that cited it, without degrading them into `to_name`. The V1 API
+    will use logical deletion, not implemented in this increment.
     """
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
@@ -394,14 +393,14 @@ def test_suppression_de_la_cible_supprime_le_lien() -> None:
 
 
 def test_types_de_relation_disponibles() -> None:
-    """Les cinq types prévus sont déclarés, avec des libellés anglais."""
+    """The five intended kinds are declared, with English labels."""
     assert RelationKind.values == ["parent", "child", "consort", "ally", "enemy"]
     assert RelationKind.PARENT.label == "Parent"
     assert RelationKind.CONSORT.label == "Consort"
 
 
 def test_type_inconnu_refuse_par_full_clean() -> None:
-    """Un `kind` hors liste est rejeté par `full_clean()`."""
+    """A `kind` outside the list is rejected by `full_clean()`."""
     lien = EntityRelation(from_entity=create_entity(), kind="rival", to_name="Yemoja")
 
     with pytest.raises(ValidationError) as excinfo:
@@ -411,7 +410,7 @@ def test_type_inconnu_refuse_par_full_clean() -> None:
 
 
 def test_ordre_deterministe_des_relations() -> None:
-    """`Meta.ordering` donne un ordre stable : `kind`, puis `to_name`, puis `id`."""
+    """`Meta.ordering` gives a stable order: `kind`, then `to_name`, then `id`."""
     source = create_entity(name="A", slug="a")
     cible = create_entity(name="B", slug="b")
     create_relation(source, RelationKind.PARENT, to_name="Zulu figure")
@@ -428,7 +427,7 @@ def test_ordre_deterministe_des_relations() -> None:
 
 
 def test_hero_peut_porter_des_relations() -> None:
-    """Les relations ne sont pas réservées aux divinités."""
+    """Relations are not reserved for divinities."""
     hero = create_hero()
     ennemi = create_creature()
 

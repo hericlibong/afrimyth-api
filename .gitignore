@@ -24,6 +24,16 @@ db.sqlite3-journal
 /media/
 /staticfiles/
 
+# Schéma OpenAPI généré localement. Le README fait écrire `schema.yml` à la
+# racine ; le contrat est produit depuis le code, jamais committé.
+/schema.yml
+/schema.yaml
+
+# Sauvegardes et exports de base. Les sauvegardes réelles vivent hors du
+# dépôt ; cette règle évite qu'un export atterrisse dans un commit.
+*.dump
+*.sql
+
 # Tests et qualité
 .pytest_cache/
 .mypy_cache/

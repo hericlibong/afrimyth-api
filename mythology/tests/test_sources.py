@@ -1,12 +1,12 @@
-"""Tests des sources documentaires.
+"""Tests of the documentary sources.
 
-**Toutes les références employées ici sont fictives**, inventées pour la
-démonstration. Aucune publication réelle n'est citée, et aucune source n'est
-attribuée à une figure du corpus.
+**Every reference used here is fictitious**, invented for demonstration.
+No real publication is cited, and no source is attributed to a figure of
+the corpus.
 
-Chaque règle est testée à sa portée réelle : la validation Django par
-`full_clean()`, la cascade et les champs obligatoires côté base là où ils le
-sont effectivement.
+Each rule is tested at its real scope: Django validation through
+`full_clean()`, the cascade and the mandatory database-side fields where
+they actually are.
 """
 
 import datetime
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_plusieurs_sources_pour_une_entite() -> None:
-    """Une entité porte zéro ou plusieurs sources, ordonnées par référence."""
+    """An entity carries zero or several sources, ordered by reference."""
     entity = create_entity()
     create_source(entity, label="Zeta Fictional Review", kind=SourceKind.ARTICLE)
     create_source(entity, label="Alpha Fictional Encyclopedia")
@@ -35,17 +35,17 @@ def test_plusieurs_sources_pour_une_entite() -> None:
 
 
 def test_entite_sans_source() -> None:
-    """Aucune source n'est requise."""
+    """No source is required."""
     entity = create_entity()
 
     assert entity.sources.count() == 0
 
 
 def test_meme_reference_sur_deux_entites() -> None:
-    """La même référence peut être saisie pour deux fiches.
+    """The same reference can be entered for two records.
 
-    Il n'y a ni catalogue partagé ni relation plusieurs-à-plusieurs : chaque
-    ligne appartient à une seule entité, et le doublon est légitime.
+    There is neither a shared catalogue nor a many-to-many relation: each row
+    belongs to a single entity, and the duplicate is legitimate.
     """
     premiere = create_entity(name="A", slug="a")
     seconde = create_entity(name="B", slug="b")
@@ -59,10 +59,10 @@ def test_meme_reference_sur_deux_entites() -> None:
 
 
 def test_doublon_exact_sur_la_meme_entite_est_autorise() -> None:
-    """Aucune unicité n'est posée : deux éditions ou usages peuvent coïncider.
+    """No uniqueness is enforced: two editions or uses may coincide.
 
-    Écarter les doublons relève du contrôle éditorial, pas de la structure de
-    la base.
+    Discarding duplicates is a matter of editorial review, not of the
+    database structure.
     """
     entity = create_entity()
 
@@ -73,7 +73,7 @@ def test_doublon_exact_sur_la_meme_entite_est_autorise() -> None:
 
 
 def test_representation_lisible() -> None:
-    """`__str__` donne la référence, sa nature et l'entité."""
+    """`__str__` gives the reference, its nature and the entity."""
     source = create_source(create_entity(), label="Fictional Museum Catalogue")
 
     assert str(source) == "Fictional Museum Catalogue (book) — Shango"
@@ -83,7 +83,7 @@ def test_representation_lisible() -> None:
 
 
 def test_source_sans_url_ni_date() -> None:
-    """Un ouvrage sans lien reste valide : `url=""` et `accessed_at=None`."""
+    """A book without a link stays valid: an empty `url` and `accessed_at=None`."""
     source = create_source(create_entity())
 
     source.full_clean()
@@ -94,7 +94,7 @@ def test_source_sans_url_ni_date() -> None:
 
 
 def test_source_orale_sans_url() -> None:
-    """Une tradition orale n'a pas d'URL, mais peut avoir une date et des notes."""
+    """An oral tradition has no URL, but may have a date and notes."""
     source = create_source(
         create_entity(),
         label="Fictional oral testimony, village of Testville",
@@ -112,7 +112,7 @@ def test_source_orale_sans_url() -> None:
 
 
 def test_date_de_consultation_sans_url() -> None:
-    """`accessed_at` est une date de consultation, indépendante de l'URL."""
+    """`accessed_at` is a consultation date, independent of the URL."""
     source = create_source(create_entity(), accessed_at=datetime.date(2026, 1, 2))
 
     source.full_clean()
@@ -122,7 +122,7 @@ def test_date_de_consultation_sans_url() -> None:
 
 
 def test_url_et_date_renseignees() -> None:
-    """Une référence en ligne porte les deux."""
+    """An online reference carries both."""
     source = create_source(
         create_entity(),
         label="Fictional Encyclopedia of Imaginary Myths",
@@ -137,7 +137,7 @@ def test_url_et_date_renseignees() -> None:
 
 
 def test_aucune_valeur_n_est_remplie_automatiquement() -> None:
-    """Ni date ni référence ne sont déduites à la création."""
+    """Neither date nor reference is inferred on creation."""
     source = Source.objects.create(
         entity=create_entity(), label="Fictional Note", kind=SourceKind.OTHER
     )
@@ -154,7 +154,7 @@ def test_aucune_valeur_n_est_remplie_automatiquement() -> None:
 
 @pytest.mark.parametrize("kind", SourceKind.values)
 def test_tous_les_kinds_valides_sont_acceptes(kind: str) -> None:
-    """Les six natures prévues passent `full_clean()`."""
+    """The six intended natures pass `full_clean()`."""
     source = create_source(create_entity(), kind=kind)
 
     source.full_clean()
@@ -163,10 +163,9 @@ def test_tous_les_kinds_valides_sont_acceptes(kind: str) -> None:
 
 
 def test_kind_inconnu_refuse_par_full_clean() -> None:
-    """Une nature hors liste est rejetée par la validation Django.
+    """A nature outside the list is rejected by Django validation.
 
-    Portée : `full_clean()` seulement. Aucune contrainte PostgreSQL ne porte
-    sur `kind`.
+    Scope: `full_clean()` only. No PostgreSQL constraint bears on `kind`.
     """
     source = Source(entity=create_entity(), label="Fictional Note", kind="podcast")
 
@@ -177,7 +176,7 @@ def test_kind_inconnu_refuse_par_full_clean() -> None:
 
 
 def test_libelle_obligatoire_refuse_par_full_clean() -> None:
-    """Un `label` vide est rejeté par la validation Django."""
+    """An empty `label` is rejected by Django validation."""
     source = Source(entity=create_entity(), label="", kind=SourceKind.BOOK)
 
     with pytest.raises(ValidationError) as excinfo:
@@ -187,11 +186,11 @@ def test_libelle_obligatoire_refuse_par_full_clean() -> None:
 
 
 def test_libelle_blanc_refuse_par_full_clean() -> None:
-    """Un `label` composé uniquement d'espaces est rejeté.
+    """A `label` made of spaces only is rejected.
 
-    Portée exacte : cette règle n'existe que dans `clean()`. `"   "` n'est pas
-    la chaîne vide, donc aucune contrainte de base ne l'intercepte —
-    `objects.create(label="   ")` serait accepté.
+    Exact scope: this rule lives in `clean()` only. A blank-filled string is
+    not the empty string, so no database constraint intercepts it - a direct
+    create with such a label would be accepted.
     """
     source = Source(entity=create_entity(), label="   ", kind=SourceKind.BOOK)
 
@@ -202,10 +201,10 @@ def test_libelle_blanc_refuse_par_full_clean() -> None:
 
 
 def test_libelle_blanc_passe_en_ecriture_directe() -> None:
-    """Documente la limite : la base n'arrête pas un libellé blanc.
+    """Document the limit: the database does not stop a blank label.
 
-    Ce test fixe le comportement réel plutôt que de laisser croire à une
-    garantie. La normalisation incombera au service d'import.
+    This test pins the real behaviour down rather than letting a guarantee be
+    assumed. Normalisation will fall to the import service.
     """
     source = Source.objects.create(
         entity=create_entity(), label="   ", kind=SourceKind.BOOK
@@ -217,7 +216,7 @@ def test_libelle_blanc_passe_en_ecriture_directe() -> None:
 
 
 def test_libelle_est_normalise_par_clean() -> None:
-    """`clean()` retire les espaces de bord d'un libellé valide."""
+    """`clean()` strips the edge whitespace of a valid label."""
     source = Source(
         entity=create_entity(),
         label="  Fictional Handbook  ",
@@ -230,10 +229,10 @@ def test_libelle_est_normalise_par_clean() -> None:
 
 
 def test_url_invalide_refusee_par_full_clean() -> None:
-    """Le format de l'URL est vérifié par `URLField`, via `full_clean()`.
+    """The URL format is checked by `URLField`, through `full_clean()`.
 
-    Aucun accès réseau n'a lieu : la disponibilité du lien n'est pas testée,
-    seule sa forme l'est.
+    No network access takes place: the availability of the link is not
+    tested, only its shape is.
     """
     source = Source(
         entity=create_entity(),
@@ -252,7 +251,7 @@ def test_url_invalide_refusee_par_full_clean() -> None:
 
 
 def test_suppression_de_l_entite_supprime_ses_sources() -> None:
-    """`CASCADE` : la suppression physique d'une fiche retire ses sources."""
+    """`CASCADE`: the physical deletion of a record removes its sources."""
     entity = create_entity()
     create_source(entity)
     create_source(entity, label="Second Fictional Reference")
@@ -263,7 +262,7 @@ def test_suppression_de_l_entite_supprime_ses_sources() -> None:
 
 
 def test_suppression_d_une_source_conserve_l_entite() -> None:
-    """Supprimer une source ne touche ni la fiche ni ses autres sources."""
+    """Deleting a source touches neither the record nor its other sources."""
     entity = create_entity()
     premiere = create_source(entity)
     create_source(entity, label="Second Fictional Reference")
@@ -275,7 +274,7 @@ def test_suppression_d_une_source_conserve_l_entite() -> None:
 
 
 def test_sources_portees_par_un_heros() -> None:
-    """Les sources ne sont pas réservées aux divinités."""
+    """Sources are not reserved for divinities."""
     hero = create_hero()
 
     create_source(hero, label="Fictional Chronicle of Test Heroes")

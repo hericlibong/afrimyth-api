@@ -1,12 +1,12 @@
-"""Tests de `create_entity_with_profile`.
+"""Tests of `create_entity_with_profile`.
 
-Les factories existantes ne sont **pas** remplacées par le service : plusieurs
-tests ont volontairement besoin d'entités sans profil ou de données invalides
-pour vérifier des limites. Ce module teste le service lui-même.
+The existing factories are **not** replaced by the service: several tests
+deliberately need entities without a profile, or invalid data, in order
+to check limits. This module tests the service itself.
 
-Les données employées sont fictives. Chaque test vérifie l'état **stocké** —
-après `refresh_from_db()` ou par une requête — et non le seul objet en
-mémoire, ni la présence d'un décorateur `atomic`.
+The data used is fictitious. Each test checks the **stored** state - after
+`refresh_from_db()` or through a query - and not the in-memory object
+alone, nor the presence of an `atomic` decorator.
 """
 
 import pytest
@@ -30,7 +30,7 @@ pytestmark = pytest.mark.django_db
 
 
 def entity_payload(**overrides: object) -> dict[str, object]:
-    """Jeu minimal valide pour le tronc commun."""
+    """Minimal valid payload for the common trunk."""
     data: dict[str, object] = {
         "name": "Shango",
         "slug": "shango",
@@ -45,7 +45,7 @@ def entity_payload(**overrides: object) -> dict[str, object]:
 
 
 def test_creation_d_une_divinite_et_de_son_seul_profil() -> None:
-    """Une divinité reçoit un `DivinityProfile`, et aucun des deux autres."""
+    """A divinity receives a `DivinityProfile`, and neither of the other two."""
     entity = create_entity_with_profile(
         entity_data=entity_payload(),
         profile_data={"cult_offerings": ["Yam"], "cult_taboos": ["Lying"]},
@@ -64,7 +64,7 @@ def test_creation_d_une_divinite_et_de_son_seul_profil() -> None:
 
 
 def test_creation_d_un_heros_et_de_son_seul_profil() -> None:
-    """Un héros reçoit un `HeroProfile`, et aucun des deux autres."""
+    """A hero receives a `HeroProfile`, and neither of the other two."""
     entity = create_entity_with_profile(
         entity_data=entity_payload(
             name="Soundiata", slug="soundiata", entity_type=EntityType.HERO
@@ -83,7 +83,7 @@ def test_creation_d_un_heros_et_de_son_seul_profil() -> None:
 
 
 def test_creation_d_une_creature_et_de_son_seul_profil() -> None:
-    """Une créature reçoit un `CreatureProfile`, et aucun des deux autres."""
+    """A creature receives a `CreatureProfile`, and neither of the other two."""
     entity = create_entity_with_profile(
         entity_data=entity_payload(
             name="Mokele-mbembe",
@@ -108,7 +108,7 @@ def test_creation_d_une_creature_et_de_son_seul_profil() -> None:
 
 
 def test_les_donnees_du_tronc_commun_sont_conservees() -> None:
-    """Les champs simples et les clés étrangères arrivent bien en base."""
+    """The simple fields and the foreign keys do reach the database."""
     country = create_country()
     entity = create_entity_with_profile(
         entity_data=entity_payload(
@@ -130,7 +130,7 @@ def test_les_donnees_du_tronc_commun_sont_conservees() -> None:
 
 
 def test_cle_etrangere_acceptee_sous_sa_forme_id() -> None:
-    """`primary_country_id` est accepté, forme utile à l'import."""
+    """`primary_country_id` is accepted, a form that is useful to the import."""
     country = create_country()
 
     entity = create_entity_with_profile(
@@ -141,7 +141,7 @@ def test_cle_etrangere_acceptee_sous_sa_forme_id() -> None:
 
 
 def test_statut_par_defaut_reste_draft() -> None:
-    """Le service ne publie rien et n'attribue aucun propriétaire."""
+    """The service publishes nothing and assigns no owner."""
     entity = create_entity_with_profile(entity_data=entity_payload())
 
     stored = Entity.objects.get(pk=entity.pk)
@@ -155,9 +155,9 @@ def test_statut_par_defaut_reste_draft() -> None:
 
 
 def test_profil_absent_cree_un_profil_par_defaut() -> None:
-    """Sans `profile_data`, le profil existe avec ses valeurs par défaut.
+    """Without `profile_data`, the profile exists with its default values.
 
-    Le point important : jamais une entité **sans** profil.
+    The important point: never an entity **without** a profile.
     """
     entity = create_entity_with_profile(entity_data=entity_payload())
 
@@ -168,7 +168,7 @@ def test_profil_absent_cree_un_profil_par_defaut() -> None:
 
 
 def test_profil_vide_cree_un_profil_par_defaut() -> None:
-    """Un dictionnaire vide est traité comme une absence."""
+    """An empty dictionary is treated as an absence."""
     entity = create_entity_with_profile(
         entity_data=entity_payload(entity_type=EntityType.CREATURE),
         profile_data={},
@@ -184,7 +184,7 @@ def test_profil_vide_cree_un_profil_par_defaut() -> None:
 
 
 def test_type_absent_est_refuse() -> None:
-    """Sans type, aucun profil ne peut être choisi : rien n'est créé."""
+    """Without a type, no profile can be chosen: nothing is created."""
     data = entity_payload()
     del data["entity_type"]
 
@@ -196,7 +196,7 @@ def test_type_absent_est_refuse() -> None:
 
 
 def test_type_vide_est_refuse() -> None:
-    """Une chaîne vide est traitée comme une absence de type."""
+    """An empty string is treated as a missing type."""
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(entity_data=entity_payload(entity_type=""))
 
@@ -205,7 +205,7 @@ def test_type_vide_est_refuse() -> None:
 
 
 def test_type_inconnu_est_refuse() -> None:
-    """Un type hors des trois valeurs est refusé avant toute écriture."""
+    """A type outside the three values is refused before any write."""
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(entity_data=entity_payload(entity_type="titan"))
 
@@ -217,10 +217,10 @@ def test_type_inconnu_est_refuse() -> None:
 
 
 def test_champ_de_profil_incompatible_est_refuse() -> None:
-    """Un champ d'un autre profil ne passe pas, et rien n'est créé.
+    """A field of another profile does not pass, and nothing is created.
 
-    `habitat` appartient au profil de créature : le demander pour une
-    divinité est une erreur d'appel, pas une donnée à ignorer.
+    `habitat` belongs to the creature profile: asking for it on a divinity is
+    a call error, not a value to ignore.
     """
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(
@@ -234,7 +234,7 @@ def test_champ_de_profil_incompatible_est_refuse() -> None:
 
 
 def test_champ_d_entite_inconnu_est_refuse() -> None:
-    """Un champ inexistant est signalé plutôt qu'écrit partiellement."""
+    """A non-existent field is reported rather than partially written."""
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(entity_data=entity_payload(pantheon="Orisha"))
 
@@ -254,10 +254,10 @@ def test_champ_d_entite_inconnu_est_refuse() -> None:
     ],
 )
 def test_collections_hors_perimetre_sont_refusees(champ: str) -> None:
-    """Les relations multiples sont explicitement hors périmètre.
+    """Many-to-many relations are explicitly out of scope.
 
-    Elles exigent une entité déjà enregistrée : l'import les rattachera après
-    l'appel, sans compromettre l'atomicité du couple entité/profil.
+    They require an already saved entity: the import attaches them after the
+    call, without compromising the atomicity of the entity/profile pair.
     """
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(entity_data=entity_payload(**{champ: []}))
@@ -268,7 +268,7 @@ def test_collections_hors_perimetre_sont_refusees(champ: str) -> None:
 
 @pytest.mark.parametrize("champ", ["id", "pk"])
 def test_identifiant_impose_est_refuse(champ: str) -> None:
-    """Un identifiant fourni est refusé : la fonction crée, elle n'écrase pas."""
+    """A supplied identifier is refused: the function creates, it does not overwrite."""
     with pytest.raises(ValidationError) as excinfo:
         create_entity_with_profile(entity_data=entity_payload(**{champ: 1}))
 
@@ -277,7 +277,7 @@ def test_identifiant_impose_est_refuse(champ: str) -> None:
 
 
 def test_identifiant_existant_ne_peut_pas_ecraser_une_fiche() -> None:
-    """Réutiliser l'`id` d'une fiche existante ne l'écrase pas."""
+    """Reusing the `id` of an existing record does not overwrite it."""
     existante = create_entity(name="Existante", slug="existante")
 
     with pytest.raises(ValidationError):
@@ -290,7 +290,7 @@ def test_identifiant_existant_ne_peut_pas_ecraser_une_fiche() -> None:
 
 @pytest.mark.parametrize("champ", ["entity", "entity_id"])
 def test_rattachement_du_profil_ne_peut_pas_etre_detourne(champ: str) -> None:
-    """Le profil est rattaché à l'entité créée, jamais à une autre."""
+    """The profile is attached to the created entity, never to another one."""
     autre = create_entity(name="Autre", slug="autre")
 
     with pytest.raises(ValidationError) as excinfo:
@@ -308,11 +308,11 @@ def test_rattachement_du_profil_ne_peut_pas_etre_detourne(champ: str) -> None:
 
 
 def test_echec_du_profil_n_laisse_aucun_residu() -> None:
-    """Si le profil échoue après l'entité, les deux créations sont annulées.
+    """If the profile fails after the entity, both creations are rolled back.
 
-    C'est le cœur de la garantie : `threat_level` invalide est détecté par le
-    `full_clean()` du profil, donc **après** l'enregistrement de l'entité.
-    Sans transaction, une entité orpheline subsisterait.
+    This is the heart of the guarantee: an invalid `threat_level` is caught by
+    the `full_clean()` of the profile, hence **after** the entity has been
+    saved. Without a transaction, an orphan entity would remain.
     """
     with pytest.raises(ValidationError):
         create_entity_with_profile(
@@ -329,7 +329,7 @@ def test_echec_du_profil_n_laisse_aucun_residu() -> None:
 
 
 def test_echec_preserve_les_donnees_prealables() -> None:
-    """Un échec ne touche pas les fiches déjà en base."""
+    """A failure does not touch the records already in the database."""
     existante = create_entity(name="Existante", slug="existante")
 
     with pytest.raises(ValidationError):
@@ -342,7 +342,7 @@ def test_echec_preserve_les_donnees_prealables() -> None:
 
 
 def test_entite_invalide_ne_cree_ni_entite_ni_profil() -> None:
-    """Un échec sur l'entité elle-même n'écrit rien non plus."""
+    """A failure on the entity itself writes nothing either."""
     with pytest.raises(ValidationError):
         create_entity_with_profile(entity_data=entity_payload(gender="plasma"))
 
@@ -354,7 +354,7 @@ def test_entite_invalide_ne_cree_ni_entite_ni_profil() -> None:
 
 
 def test_slug_duplique_est_refuse() -> None:
-    """L'unicité du slug reste appliquée, et rien ne subsiste."""
+    """Slug uniqueness is still enforced, and nothing remains."""
     create_entity_with_profile(entity_data=entity_payload())
 
     with pytest.raises(ValidationError):
@@ -365,7 +365,7 @@ def test_slug_duplique_est_refuse() -> None:
 
 
 def test_couple_nom_type_duplique_est_refuse() -> None:
-    """La contrainte `(name, entity_type)` reste appliquée."""
+    """The `(name, entity_type)` constraint is still enforced."""
     create_entity_with_profile(entity_data=entity_payload())
 
     with pytest.raises(ValidationError):
@@ -375,7 +375,7 @@ def test_couple_nom_type_duplique_est_refuse() -> None:
 
 
 def test_meme_nom_sous_deux_types_reste_possible() -> None:
-    """La contrainte porte sur le couple, pas sur le nom seul."""
+    """The constraint bears on the pair, not on the name alone."""
     create_entity_with_profile(entity_data=entity_payload())
     create_entity_with_profile(
         entity_data=entity_payload(
@@ -391,7 +391,7 @@ def test_meme_nom_sous_deux_types_reste_possible() -> None:
 
 
 def test_les_dictionnaires_fournis_ne_sont_pas_modifies() -> None:
-    """Le service ne mute pas les données de l'appelant."""
+    """The service does not mutate the data of the caller."""
     entity_data = entity_payload()
     profile_data: dict[str, object] = {"cult_offerings": ["Yam"]}
     attendu_entite = dict(entity_data)
@@ -407,12 +407,12 @@ def test_les_dictionnaires_fournis_ne_sont_pas_modifies() -> None:
 
 
 def test_l_orm_direct_contourne_encore_le_service() -> None:
-    """Documente la limite : le service ne couvre que ses propres appels.
+    """Document the limit: the service covers its own calls only.
 
-    Un `objects.create()` direct — comme l'administration ou un import mal
-    écrit — produit toujours une entité sans profil. Couvrir ces chemins
-    relève de la phase 4 ; ce test fixe l'état réel afin qu'il ne soit pas
-    confondu avec une garantie globale.
+    A direct `objects.create()` - as the admin or a badly written import does
+    - still produces an entity without a profile. Covering those paths
+    belongs to phase 4; this test pins the real state down so that it is not
+    mistaken for a global guarantee.
     """
     orpheline = Entity.objects.create(
         name="Orpheline",
@@ -426,10 +426,10 @@ def test_l_orm_direct_contourne_encore_le_service() -> None:
 
 
 def test_le_type_peut_encore_changer_apres_creation() -> None:
-    """Autre limite : le service ne verrouille pas `entity_type`.
+    """Another limit: the service does not lock `entity_type`.
 
-    Après création, modifier le type laisse le profil d'origine en place. La
-    cohérence dans le temps n'est pas garantie par cette fonction.
+    After creation, changing the type leaves the original profile in place.
+    Consistency over time is not guaranteed by this function.
     """
     entity = create_entity_with_profile(entity_data=entity_payload())
 
@@ -444,7 +444,7 @@ def test_le_type_peut_encore_changer_apres_creation() -> None:
 
 
 def test_un_second_profil_reste_impossible_par_le_onetoone() -> None:
-    """Le `OneToOneField` empêche un second profil du même type."""
+    """The `OneToOneField` prevents a second profile of the same type."""
     entity = create_entity_with_profile(entity_data=entity_payload())
 
     with pytest.raises(IntegrityError), transaction.atomic():

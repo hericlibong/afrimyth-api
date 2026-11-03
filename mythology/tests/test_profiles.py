@@ -1,7 +1,8 @@
-"""Tests des profils `HeroProfile` et `CreatureProfile`.
+"""Tests of the `HeroProfile` and `CreatureProfile` profiles.
 
-Le profil de divinité est couvert par `test_models.py` ; ce module ajoute les
-deux profils de la phase 2 et vérifie que les trois cohabitent sans régression.
+The divinity profile is covered by `test_models.py`; this module adds the
+two profiles of phase 2 and checks that the three coexist without
+regression.
 """
 
 import pytest
@@ -22,7 +23,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_creation_d_un_profil_de_heros() -> None:
-    """Le profil de héros est relié à son entité dans les deux sens."""
+    """The hero profile is linked to its entity both ways."""
     hero = create_hero()
     profile = create_hero_profile(
         hero,
@@ -44,7 +45,7 @@ def test_creation_d_un_profil_de_heros() -> None:
 
 
 def test_profil_de_heros_vide_par_defaut() -> None:
-    """Les quatre listes sont vides et les deux textes sont des chaînes vides."""
+    """The four lists are empty and the two texts are empty strings."""
     profile = create_hero_profile(create_hero())
 
     assert profile.titles == []
@@ -56,7 +57,7 @@ def test_profil_de_heros_vide_par_defaut() -> None:
 
 
 def test_creation_d_un_profil_de_creature() -> None:
-    """Le profil de créature est relié à son entité dans les deux sens."""
+    """The creature profile is linked to its entity both ways."""
     creature = create_creature()
     profile = create_creature_profile(
         creature,
@@ -83,10 +84,10 @@ def test_creation_d_un_profil_de_creature() -> None:
 
 
 def test_profil_de_creature_vide_par_defaut() -> None:
-    """Les sept listes sont vides et `threat_level` est `None` à la création.
+    """The seven lists are empty and `threat_level` is `None` on creation.
 
-    `None` est bien le défaut d'un champ nullable sans `default` explicite ;
-    cela ne dit rien d'une valeur `""` fournie explicitement.
+    `None` is indeed the default of a nullable field without an explicit
+    `default`; this says nothing about an empty string supplied explicitly.
     """
     profile = create_creature_profile(create_creature())
 
@@ -98,17 +99,16 @@ def test_profil_de_creature_vide_par_defaut() -> None:
 
 
 def test_champ_de_formulaire_de_threat_level_utilise_none_comme_valeur_vide() -> None:
-    """Le champ de **formulaire** de `threat_level` a `empty_value=None`.
+    """The **form** field of `threat_level` has `empty_value=None`.
 
-    Portée exacte de ce test : Django impose `empty_value=None` au formulaire
-    d'un champ à `choices` nullable, donc un choix laissé vide dans un
-    formulaire ou dans l'administration est enregistré `NULL`.
+    Exact scope of this test: Django imposes `empty_value=None` on the form of
+    a nullable field with `choices`, so a choice left blank in a form or in
+    the admin is stored as `NULL`.
 
-    Ce n'est **pas** une garantie générale de la base : un appel ORM direct ou
-    un futur serializer d'écriture peut encore stocker `""`. L'API étant en
-    lecture seule, ce cas n'est pas exposé aujourd'hui ; la normalisation de
-    `""` vers `None` sera imposée dans les serializers ou services d'écriture
-    de la phase 4.
+    This is **not** a general database guarantee: a direct ORM call or a
+    future write serializer can still store an empty string. Since the API is
+    read-only, that case is not exposed today; normalising an empty string to
+    `None` will be imposed in the write serializers or services of phase 4.
     """
     form_field = CreatureProfile._meta.get_field("threat_level").formfield()
 
@@ -117,7 +117,7 @@ def test_champ_de_formulaire_de_threat_level_utilise_none_comme_valeur_vide() ->
 
 
 def test_profil_de_heros_refuse_une_divinite() -> None:
-    """La validation rejette un profil de héros sur une divinité."""
+    """Validation rejects a hero profile on a divinity."""
     divinity = create_entity()
 
     with pytest.raises(ValidationError) as excinfo:
@@ -127,7 +127,7 @@ def test_profil_de_heros_refuse_une_divinite() -> None:
 
 
 def test_profil_de_creature_refuse_un_heros() -> None:
-    """La validation rejette un profil de créature sur un héros."""
+    """Validation rejects a creature profile on a hero."""
     hero = create_hero()
 
     with pytest.raises(ValidationError) as excinfo:
@@ -137,13 +137,13 @@ def test_profil_de_creature_refuse_un_heros() -> None:
 
 
 def test_profils_acceptent_leur_propre_type() -> None:
-    """La même validation laisse passer le type attendu."""
+    """The same validation lets the expected type through."""
     HeroProfile(entity=create_hero()).full_clean()
     CreatureProfile(entity=create_creature()).full_clean()
 
 
 def test_un_seul_profil_de_heros_par_entite() -> None:
-    """Le `OneToOneField` interdit un second profil sur la même entité."""
+    """The `OneToOneField` forbids a second profile on the same entity."""
     hero = create_hero()
     create_hero_profile(hero)
 
@@ -152,7 +152,7 @@ def test_un_seul_profil_de_heros_par_entite() -> None:
 
 
 def test_un_seul_profil_de_creature_par_entite() -> None:
-    """Le `OneToOneField` interdit un second profil sur la même entité."""
+    """The `OneToOneField` forbids a second profile on the same entity."""
     creature = create_creature()
     create_creature_profile(creature)
 
@@ -161,7 +161,7 @@ def test_un_seul_profil_de_creature_par_entite() -> None:
 
 
 def test_suppression_de_l_entite_supprime_les_profils() -> None:
-    """Le `CASCADE` emporte le profil de héros comme celui de créature."""
+    """The `CASCADE` takes the hero profile as well as the creature one."""
     hero = create_hero()
     create_hero_profile(hero)
     creature = create_creature()

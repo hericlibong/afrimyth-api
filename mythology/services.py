@@ -1,11 +1,10 @@
-"""Fonctions métier du domaine mythologique.
+"""Business functions of the mythological domain.
 
-Ce module ne contient pas une « couche de services » : seulement les
-fonctions explicitement demandées par la roadmap, là où une règle métier ne
-peut pas être portée par un modèle seul. La décision 6 de l'ADR 0002 prévoit
-qu'une entité possède exactement le profil correspondant à son type, et
-précise que cette cohérence est « garantie par le service de création », non
-par une abstraction polymorphe.
+This module is not a service layer: it holds only the functions the
+roadmap explicitly asked for, where a business rule cannot be carried by
+a model alone. Decision 6 of ADR 0002 states that an entity owns exactly
+the profile matching its type, and specifies that this consistency is
+guaranteed by the creation service, not by a polymorphic abstraction.
 """
 
 from __future__ import annotations
@@ -37,12 +36,12 @@ PROFILE_MODELS: dict[str, ProfileModel] = {
 
 
 def _writable_field_names(model: type[models.Model]) -> set[str]:
-    """Retourne les noms de champs concrets et éditables d'un modèle.
+    """Return the concrete, editable field names of a model.
 
-    Déduits par introspection plutôt qu'écrits en dur : la liste suit donc
-    l'évolution des modèles sans intervention. Sont exclus d'office les
-    champs non éditables — `id`, `created_at` et `updated_at` — ainsi que les
-    relations multiples, qui ne sont pas des colonnes.
+    Derived by introspection rather than hard-coded: the list therefore
+    follows the models as they evolve, without intervention. Non-editable
+    fields - `id`, `created_at` and `updated_at` - are excluded outright, as
+    are many-to-many relations, which are not columns.
     """
     names: set[str] = set()
     for field in model._meta.concrete_fields:
@@ -57,7 +56,7 @@ def _writable_field_names(model: type[models.Model]) -> set[str]:
 
 
 def _many_to_many_field_names(model: type[models.Model]) -> set[str]:
-    """Retourne les noms des relations multiples du modèle."""
+    """Return the names of the many-to-many relations of the model."""
     return {field.name for field in model._meta.many_to_many}
 
 
@@ -68,10 +67,10 @@ def _reject_unknown_fields(
     label: str,
     forbidden: Mapping[str, str],
 ) -> None:
-    """Refuse tout champ interdit ou inconnu, avant la moindre écriture.
+    """Refuse any forbidden or unknown field, before the slightest write.
 
-    Les messages sont en anglais, conformément à l'ADR 0003, et nomment les
-    champs fautifs afin que l'appelant puisse corriger son entrée.
+    The messages are in English, as required by ADR 0003, and name the
+    offending fields so that the caller can correct its input.
     """
     for name, reason in forbidden.items():
         if name in data:
@@ -94,48 +93,47 @@ def create_entity_with_profile(
     entity_data: Mapping[str, Any],
     profile_data: Mapping[str, Any] | None = None,
 ) -> Entity:
-    """Crée une entité et exactement le profil correspondant à son type.
+    """Create an entity and exactly the profile matching its type.
 
-    Les deux écritures ont lieu dans la même transaction : soit l'entité et
-    son profil existent, soit rien n'est créé. C'est la garantie que la
-    décision 6 de l'ADR 0002 attend d'un service de création.
+    Both writes happen in the same transaction: either the entity and its
+    profile exist, or nothing is created. That is the guarantee decision 6 of
+    ADR 0002 expects from a creation service.
 
     Args:
-        entity_data: champs simples et clés étrangères de l'entité.
-            `entity_type` est obligatoire. Les relations multiples sont
-            refusées, voir la section « Frontière » ci-dessous.
-        profile_data: champs du profil correspondant au type. Un
-            dictionnaire absent ou vide crée le profil avec ses valeurs par
-            défaut — **jamais** une entité sans profil.
+        entity_data: simple fields and foreign keys of the entity.
+            `entity_type` is required. Many-to-many relations are refused,
+            see the Boundary section below.
+        profile_data: fields of the profile matching the type. A missing or
+            empty dictionary creates the profile with its default values -
+            **never** an entity without a profile.
 
     Returns:
-        L'entité créée, enregistrée, avec son profil en base.
+        The created entity, saved, with its profile in the database.
 
     Raises:
-        ValidationError: type absent ou inconnu, champ inconnu, champ hors
-            périmètre, ou échec de `full_clean()` sur l'entité ou le profil.
-            Dans tous les cas, aucune ligne ne subsiste.
+        ValidationError: missing or unknown type, unknown field, field out of
+            scope, or `full_clean()` failure on the entity or the profile. In
+            every case, no row is left behind.
 
-    **Portée de la garantie.** Cette fonction garantit le résultat de ses
-    propres appels réussis. Elle ne contrôle pas les autres chemins
-    d'écriture : un `Entity.objects.create()` direct, un import de données ou
-    l'administration Django peuvent toujours produire une entité sans profil,
-    et rien n'empêche de changer `entity_type` après coup. Couvrir ces
-    chemins relève de la phase 4.
+    **Scope of the guarantee.** This function guarantees the outcome of its
+    own successful calls. It does not control the other write paths: a direct
+    `Entity.objects.create()`, a data import or the Django admin can still
+    produce an entity without a profile, and nothing prevents changing
+    `entity_type` afterwards. Covering those paths belongs to phase 4.
 
-    **Frontière.** Les relations multiples — `secondary_countries`,
-    `secondary_ethnicities`, `secondary_cultural_areas`, `domains` — ainsi
-    que les relations entre figures et les sources ne sont pas traitées ici,
-    et leur passage dans `entity_data` est refusé pour limiter le rôle de
-    cette fonction au couple entité/profil. Elles exigent une entité déjà
-    enregistrée, mais pourraient être ajoutées dans une même transaction
-    sans affaiblir son atomicité. L'import appellera cette fonction dans sa
-    propre transaction, puis rattachera ces collections.
+    **Boundary.** Many-to-many relations - `secondary_countries`,
+    `secondary_ethnicities`, `secondary_cultural_areas`, `domains` - as well
+    as relations between figures and sources are not handled here, and
+    passing one of them in `entity_data` is refused, in order to keep the
+    role of this function to the entity/profile pair. They require an already
+    saved entity, but could be added within the same transaction without
+    weakening its atomicity. The import calls this function inside its own
+    transaction, then attaches those collections.
 
-    **Création seulement.** La fonction ne modifie jamais une fiche ou un
-    profil préexistant : `id` et `pk` ne sont pas acceptés, et le
-    rattachement du profil est imposé par la fonction, non par l'appelant.
-    Les dictionnaires reçus ne sont pas modifiés.
+    **Creation only.** The function never modifies a pre-existing record or
+    profile: `id` and `pk` are not accepted, and the profile attachment is
+    imposed by the function, not by the caller. The dictionaries received are
+    not modified.
     """
     entity_type = entity_data.get("entity_type")
     if not entity_type:

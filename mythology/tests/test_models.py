@@ -9,7 +9,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_creation_d_une_divinite_et_de_son_profil() -> None:
-    """Une divinité et son profil sont reliés dans les deux sens."""
+    """A divinity and its profile are linked both ways."""
     entity = create_entity(
         name="Shango",
         slug="shango",
@@ -34,7 +34,7 @@ def test_creation_d_une_divinite_et_de_son_profil() -> None:
 
 
 def test_uuid_est_la_cle_primaire() -> None:
-    """La clé primaire est un UUID généré automatiquement."""
+    """The primary key is an automatically generated UUID."""
     entity = create_entity()
 
     assert entity.pk is not None
@@ -44,7 +44,7 @@ def test_uuid_est_la_cle_primaire() -> None:
 
 
 def test_profil_refuse_une_entite_d_un_autre_type() -> None:
-    """La validation rejette un profil de divinité sur un héros."""
+    """Validation rejects a divinity profile on a hero."""
     hero = create_entity(
         name="Soundiata", slug="soundiata", entity_type=EntityType.HERO
     )
@@ -57,14 +57,14 @@ def test_profil_refuse_une_entite_d_un_autre_type() -> None:
 
 
 def test_profil_accepte_une_divinite() -> None:
-    """La même validation laisse passer une entité de type `divinity`."""
+    """The same validation lets an entity of type `divinity` through."""
     entity = create_entity()
 
     DivinityProfile(entity=entity).full_clean()
 
 
 def test_nom_unique_par_type() -> None:
-    """Deux entités de même type ne peuvent pas porter le même nom."""
+    """Two entities of the same type cannot carry the same name."""
     create_entity(name="Mami Wata", slug="mami-wata")
 
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -72,7 +72,7 @@ def test_nom_unique_par_type() -> None:
 
 
 def test_meme_nom_autorise_pour_deux_types_differents() -> None:
-    """La contrainte porte sur le couple, pas sur le nom seul."""
+    """The constraint bears on the pair, not on the name alone."""
     create_entity(name="Mami Wata", slug="mami-wata")
     create_entity(
         name="Mami Wata",
@@ -84,7 +84,7 @@ def test_meme_nom_autorise_pour_deux_types_differents() -> None:
 
 
 def test_suppression_de_l_entite_supprime_le_profil() -> None:
-    """Le `CASCADE` du `OneToOneField` emporte le profil."""
+    """The `CASCADE` of the `OneToOneField` takes the profile with it."""
     entity = create_entity()
     create_divinity_profile(entity)
 

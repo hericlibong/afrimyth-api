@@ -1,4 +1,4 @@
-"""Tests des quatre référentiels et de leurs relations avec `Entity`."""
+"""Tests of the four reference models and of their relations with `Entity`."""
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_creation_et_representation_des_referentiels() -> None:
-    """Les quatre référentiels se créent et s'affichent par leur nom."""
+    """The four reference models are created and displayed by their name."""
     area = create_cultural_area()
     country = create_country()
     ethnicity = create_ethnicity(primary_cultural_area=area)
@@ -38,7 +38,7 @@ def test_creation_et_representation_des_referentiels() -> None:
 
 
 def test_aire_culturelle_hierarchique() -> None:
-    """Une aire peut avoir un parent, accessible par `children`."""
+    """An area may have a parent, reachable through `children`."""
     parent = create_cultural_area()
     child = create_cultural_area(name="Yorubaland", slug="yorubaland", parent=parent)
 
@@ -57,7 +57,7 @@ def test_aire_culturelle_hierarchique() -> None:
     ],
 )
 def test_unicite_du_nom_et_du_slug_des_pays(doublon: dict[str, str]) -> None:
-    """Le nom et le slug d'un pays sont uniques indépendamment."""
+    """The name and the slug of a country are unique independently."""
     create_country()
 
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -65,7 +65,7 @@ def test_unicite_du_nom_et_du_slug_des_pays(doublon: dict[str, str]) -> None:
 
 
 def test_unicite_des_noms_des_quatre_referentiels() -> None:
-    """Chacun des quatre modèles refuse un nom déjà pris."""
+    """Each of the four models refuses a name that is already taken."""
     create_cultural_area()
     create_ethnicity()
     create_domain()
@@ -83,13 +83,13 @@ def test_unicite_des_noms_des_quatre_referentiels() -> None:
 
 
 def test_kind_valide_est_accepte() -> None:
-    """Les trois valeurs techniques de `kind` passent `full_clean()`."""
+    """The three technical values of `kind` pass `full_clean()`."""
     for index, kind in enumerate(CulturalAreaKind.values):
         CulturalArea(name=f"Area {index}", slug=f"area-{index}", kind=kind).full_clean()
 
 
 def test_kind_inconnu_est_refuse() -> None:
-    """Une valeur hors `CulturalAreaKind` est rejetée par `full_clean()`."""
+    """A value outside `CulturalAreaKind` is rejected by `full_clean()`."""
     area = CulturalArea(name="Area", slug="area", kind="galactic")
 
     with pytest.raises(ValidationError) as excinfo:
@@ -99,7 +99,7 @@ def test_kind_inconnu_est_refuse() -> None:
 
 
 def test_aire_ne_peut_etre_son_propre_parent_validation() -> None:
-    """`full_clean()` refuse une aire qui se désigne elle-même comme parent."""
+    """`full_clean()` refuses an area that names itself as its parent."""
     area = create_cultural_area()
     area.parent = area
 
@@ -110,10 +110,10 @@ def test_aire_ne_peut_etre_son_propre_parent_validation() -> None:
 
 
 def test_aire_ne_peut_etre_son_propre_parent_en_base() -> None:
-    """La contrainte de base rejette aussi un `save()` direct.
+    """The database constraint also rejects a direct `save()`.
 
-    C'est ici la seule garantie réelle : contrairement au `clean()`, elle
-    s'applique même sans passer par un formulaire.
+    This is the only real guarantee here: unlike `clean()`, it applies even
+    without going through a form.
     """
     area = create_cultural_area()
     area.parent = area
@@ -123,10 +123,10 @@ def test_aire_ne_peut_etre_son_propre_parent_en_base() -> None:
 
 
 def test_iso_code_est_normalise_en_majuscules() -> None:
-    """Un code saisi en minuscules est enregistré en majuscules.
+    """A code typed in lower case is stored in upper case.
 
-    La normalisation a lieu dans `save()`, donc elle s'applique aussi à un
-    appel ORM direct, et pas seulement aux formulaires.
+    The normalisation happens in `save()`, so it also applies to a direct ORM
+    call, and not only to forms.
     """
     country = create_country(iso_code=" ng ")
 
@@ -137,12 +137,11 @@ def test_iso_code_est_normalise_en_majuscules() -> None:
 
 @pytest.mark.parametrize("code", ["N1", "ÉÀ", "N", "NGA"])
 def test_iso_code_invalide_est_refuse_par_full_clean(code: str) -> None:
-    """Un code non alphabétique est rejeté par `full_clean()`.
+    """A non-alphabetic code is rejected by `full_clean()`.
 
-    Portée exacte : ce contrôle de format n'existe que dans `clean()`. Un
-    `objects.create(iso_code="N1")` ne serait arrêté par aucune contrainte de
-    base, la seule règle en base étant la longueur maximale de deux
-    caractères.
+    Exact scope: this format check lives in `clean()` only. A direct create
+    with a malformed code would be stopped by no database constraint, the
+    only database rule being the maximum length of two characters.
     """
     country = Country(name="Testland", slug="testland", iso_code=code)
 
@@ -153,7 +152,7 @@ def test_iso_code_invalide_est_refuse_par_full_clean(code: str) -> None:
 
 
 def test_full_clean_normalise_avant_de_controler_la_longueur() -> None:
-    """Les espaces sont retirés avant la validation de longueur du champ."""
+    """Whitespace is stripped before the field length validation."""
     country = Country(name="Testland", slug="testland", iso_code=" ng ")
 
     country.full_clean()
@@ -162,7 +161,7 @@ def test_full_clean_normalise_avant_de_controler_la_longueur() -> None:
 
 
 def test_plusieurs_pays_sans_code_iso() -> None:
-    """L'unicité conditionnelle autorise plusieurs pays sans code ISO."""
+    """Conditional uniqueness allows several countries without an ISO code."""
     create_country(name="Sans code A", slug="sans-code-a", iso_code="")
     create_country(name="Sans code B", slug="sans-code-b", iso_code="")
 
@@ -170,7 +169,7 @@ def test_plusieurs_pays_sans_code_iso() -> None:
 
 
 def test_code_iso_renseigne_reste_unique() -> None:
-    """Deux pays ne peuvent pas partager le même code ISO renseigné."""
+    """Two countries cannot share the same filled-in ISO code."""
     create_country()
 
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -181,7 +180,7 @@ def test_code_iso_renseigne_reste_unique() -> None:
 
 
 def test_suppression_protegee_du_pays_principal() -> None:
-    """Un pays utilisé comme ancrage principal ne peut pas être supprimé."""
+    """A country used as a primary anchor cannot be deleted."""
     country = create_country()
     create_entity(primary_country=country)
 
@@ -192,7 +191,7 @@ def test_suppression_protegee_du_pays_principal() -> None:
 
 
 def test_suppression_protegee_de_l_ethnie_principale() -> None:
-    """Une ethnie utilisée comme ancrage principal est protégée."""
+    """An ethnicity used as a primary anchor is protected."""
     ethnicity = create_ethnicity()
     create_entity(primary_ethnicity=ethnicity)
 
@@ -201,7 +200,7 @@ def test_suppression_protegee_de_l_ethnie_principale() -> None:
 
 
 def test_suppression_protegee_de_l_aire_principale() -> None:
-    """Une aire utilisée comme ancrage principal est protégée."""
+    """An area used as a primary anchor is protected."""
     area = create_cultural_area()
     create_entity(primary_cultural_area=area)
 
@@ -210,7 +209,7 @@ def test_suppression_protegee_de_l_aire_principale() -> None:
 
 
 def test_suppression_protegee_de_l_aire_parente() -> None:
-    """Une aire parente d'une autre aire est protégée."""
+    """An area that is the parent of another area is protected."""
     parent = create_cultural_area()
     create_cultural_area(name="Yorubaland", slug="yorubaland", parent=parent)
 
@@ -219,7 +218,7 @@ def test_suppression_protegee_de_l_aire_parente() -> None:
 
 
 def test_suppression_protegee_de_l_aire_d_une_ethnie() -> None:
-    """L'aire principale d'une ethnie est protégée."""
+    """The primary area of an ethnicity is protected."""
     area = create_cultural_area()
     create_ethnicity(primary_cultural_area=area)
 
@@ -228,10 +227,10 @@ def test_suppression_protegee_de_l_aire_d_une_ethnie() -> None:
 
 
 def test_domaine_secondaire_reste_supprimable() -> None:
-    """Un rattachement multiple n'empêche pas la suppression.
+    """A many-to-many attachment does not prevent deletion.
 
-    `ManyToManyField` n'accepte pas `on_delete` : seules les trois clés
-    principales sont protégées. La suppression retire simplement le lien.
+    `ManyToManyField` accepts no `on_delete`: only the three primary keys are
+    protected. Deletion simply removes the link.
     """
     domain = create_domain()
     entity = create_entity()
@@ -247,7 +246,7 @@ def test_domaine_secondaire_reste_supprimable() -> None:
 
 
 def test_coexistence_des_rattachements_principaux_et_secondaires() -> None:
-    """Les trois ancrages et les quatre collections cohabitent."""
+    """The three anchors and the four collections coexist."""
     area = create_cultural_area()
     diaspora = create_cultural_area(
         name="Caribbean diaspora",
@@ -283,7 +282,7 @@ def test_coexistence_des_rattachements_principaux_et_secondaires() -> None:
 
 
 def test_plusieurs_valeurs_par_collection() -> None:
-    """Une entité accepte plusieurs pays, ethnies, aires et domaines."""
+    """An entity accepts several countries, ethnicities, areas and domains."""
     entity = create_entity()
     entity.secondary_countries.add(
         create_country(name="Benin", slug="benin", iso_code="BJ"),
@@ -313,10 +312,10 @@ def test_plusieurs_valeurs_par_collection() -> None:
 
 
 def test_related_names_distinguent_principal_et_secondaire() -> None:
-    """Les accès inverses ne mélangent pas ancrage et rattachement.
+    """The reverse accessors do not mix anchor and attachment.
 
-    Un même pays peut être l'ancrage d'une entité et un rattachement
-    secondaire d'une autre : les deux relations restent lisibles séparément.
+    One country can be the anchor of an entity and a secondary attachment of
+    another: both relations stay readable separately.
     """
     country = create_country()
     principale = create_entity(primary_country=country)
@@ -328,7 +327,7 @@ def test_related_names_distinguent_principal_et_secondaire() -> None:
 
 
 def test_entite_sans_rattachement() -> None:
-    """Les nouveaux champs sont facultatifs : rien n'est requis."""
+    """The new fields are optional: nothing is required."""
     entity = create_entity()
 
     assert entity.primary_country is None
@@ -341,12 +340,12 @@ def test_entite_sans_rattachement() -> None:
 
 
 def test_meme_valeur_principale_et_secondaire_n_est_pas_bloquee() -> None:
-    """Documente que la règle « principal ≠ secondaire » n'est pas imposée.
+    """Document that the primary is not secondary rule is not enforced.
 
-    L'ADR 0002 la prévoit, mais aucune barrière ne l'applique dans cet
-    incrément : ce test fixe le comportement réel pour que la situation soit
-    constatée, et non découverte plus tard. Son application appartiendra aux
-    services d'import et d'écriture, avant l'ouverture du CRUD.
+    ADR 0002 provides for it, but no barrier applies it in this increment:
+    this test pins the real behaviour down so that the situation is observed,
+    and not discovered later. Enforcing it will belong to the import and
+    write services, before CRUD is opened.
     """
     country = create_country()
     entity = create_entity(primary_country=country)

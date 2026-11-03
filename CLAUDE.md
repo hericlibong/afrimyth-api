@@ -75,17 +75,20 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
     y compris celles des modules, classes, fonctions et tests internes.
   - **En français** — commentaires internes hors docstrings ; prompts ; rapports
     de `docs/reports/` ; documentation interne.
-  - Les nouvelles docstrings sont en anglais. La traduction des docstrings
-    françaises existantes est reportée à une passe documentaire avant la
-    livraison V1, sans changement fonctionnel (précision de l'ADR 0003).
+  - Les docstrings sont en anglais, sans exception. La passe documentaire
+    prévue par l'ADR 0003 a été faite à l'incrément 3 de la phase 6 : les
+    377 docstrings françaises du code et des tests sont traduites, et il n'en
+    reste aucune. Toute docstring française introduite désormais est une
+    régression.
   - **Aucune internationalisation n'est ajoutée à ce stade** : pas de tables de
     traduction, pas de champs suffixés par langue, pas de `gettext` sur les
     chaînes publiques.
-  - Ne traduis pas les fichiers sources existants au passage. Les libellés
-    encore en français et techniquement visibles — `verbose_name`, libellés de
-    choix, `help_text`, messages d'erreur de `clean()` — sont une dette connue,
-    inscrite dans la roadmap, à normaliser avant la stabilisation du contrat
-    public.
+  - Les libellés publics — `verbose_name`, libellés de choix, `help_text`,
+    messages de `clean()` — sont **déjà** en anglais : la dette de l'ADR 0003
+    est résorbée, et un relevé par introspection des modèles n'en trouve
+    aucun en français. Le schéma OpenAPI ne contient aucun caractère
+    accentué. `test_libelles_de_choix_sont_en_anglais` et
+    `test_verbose_names_sont_en_anglais` gardent cette règle.
 
 ## Hors périmètre à ce stade
 

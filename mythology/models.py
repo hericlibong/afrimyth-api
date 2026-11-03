@@ -1,19 +1,19 @@
-"""Modèles du domaine mythologique.
+"""Models of the mythological domain.
 
-Contenu actuel : le tronc commun `Entity` — avec sa variante éventuelle
-(`variant_of`) —, ses trois profils métier (`DivinityProfile`, `HeroProfile`,
-`CreatureProfile`), les quatre référentiels validés (`CulturalArea`,
-`Country`, `Ethnicity`, `Domain`) et les liens entre figures
-(`EntityRelation`).
+Current content: the `Entity` common trunk - with its possible variant
+(`variant_of`) -, its three business profiles (`DivinityProfile`,
+`HeroProfile`, `CreatureProfile`), the four validated reference models
+(`CulturalArea`, `Country`, `Ethnicity`, `Domain`) and the links between
+figures (`EntityRelation`).
 
-S'y ajoutent les références documentaires (`Source`) et les champs de
-plateforme de `Entity` : propriété, état éditorial, revue et suppression
-logique.
+To these are added the documentary references (`Source`) and the platform
+fields of `Entity`: ownership, editorial state, review and logical
+deletion.
 
-Ces champs de plateforme sont **posés, non pilotés** : les transitions de
-statut, l'attribution automatique du propriétaire, les rôles, les permissions
-et la restauration appartiennent à la phase 4. Les données de rendu visuel
-sont hors V1, conformément à la section 8 de l'ADR 0002.
+Those platform fields are **declared, not driven**: status transitions,
+automatic owner assignment, roles, permissions and restoration belong to
+phase 4. Visual rendering data is out of V1 scope, as stated in section 8
+of ADR 0002.
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ from django.db.models import F, Q
 
 
 class EntityType(models.TextChoices):
-    """Type d'une figure mythologique.
+    """Type of a mythological figure.
 
-    Le type gouverne le profil métier attendu. Il reste distinct de
-    `Entity.category`, qui est un sous-titre éditorial libre.
+    The type governs the expected business profile. It stays distinct from
+    `Entity.category`, which is a free editorial subtitle.
     """
 
     DIVINITY = "divinity", "Divinity"
@@ -41,7 +41,7 @@ class EntityType(models.TextChoices):
 
 
 class Gender(models.TextChoices):
-    """Genre de la figure, limité aux valeurs observées dans le corpus."""
+    """Gender of the figure, limited to the values observed in the corpus."""
 
     MALE = "male", "Male"
     FEMALE = "female", "Female"
@@ -51,7 +51,7 @@ class Gender(models.TextChoices):
 
 
 class ThreatLevel(models.TextChoices):
-    """Niveau de menace d'une créature, facultatif."""
+    """Threat level of a creature, optional."""
 
     LOW = "low", "Low"
     MEDIUM = "medium", "Moderate"
@@ -60,11 +60,11 @@ class ThreatLevel(models.TextChoices):
 
 
 class CulturalAreaKind(models.TextChoices):
-    """Nature d'une aire culturelle.
+    """Nature of a cultural area.
 
-    Les trois valeurs décrivent des phénomènes distincts, conformément à la
-    décision 3 de l'ADR 0002 : une aire interne au continent, une portée
-    transrégionale, et une transmission hors d'Afrique.
+    The three values describe distinct phenomena, as stated by decision 3 of
+    ADR 0002: an area internal to the continent, a transregional scope, and a
+    transmission outside Africa.
     """
 
     AFRICAN_REGION = "african_region", "African region"
@@ -73,10 +73,10 @@ class CulturalAreaKind(models.TextChoices):
 
 
 class RelationKind(models.TextChoices):
-    """Nature d'un lien entre deux figures.
+    """Nature of a link between two figures.
 
-    Le libellé qualifie toujours la **cible** du lien, lu depuis la source :
-    `parent` signifie « la cible est un parent de la source ».
+    The label always qualifies the **target** of the link, read from the
+    source: `parent` means that the target is a parent of the source.
     """
 
     PARENT = "parent", "Parent"
@@ -87,12 +87,12 @@ class RelationKind(models.TextChoices):
 
 
 class EntityStatus(models.TextChoices):
-    """État éditorial d'une fiche, au sens de la décision 7 de l'ADR 0002.
+    """Editorial state of a record, as defined by decision 7 of ADR 0002.
 
-    Aucun statut `deleted` : la suppression logique est portée séparément par
-    `Entity.deleted_at`, de sorte qu'une fiche supprimée conserve l'état
-    éditorial qu'elle avait. Un champ unique mêlant les deux notions
-    obligerait à choisir entre « était publiée » et « est supprimée ».
+    There is no `deleted` status: logical deletion is carried separately by
+    `Entity.deleted_at`, so that a deleted record keeps the editorial state it
+    had. A single field mixing both notions would force a choice between was
+    published and is deleted.
     """
 
     DRAFT = "draft", "Draft"
@@ -102,10 +102,10 @@ class EntityStatus(models.TextChoices):
 
 
 class ActiveEntityManager(models.Manager["Entity"]):
-    """Manager restreint aux fiches non supprimées logiquement.
+    """Manager restricted to records that are not logically deleted.
 
-    Ne filtre **que** `deleted_at` : le statut éditorial n'entre pas en jeu,
-    le filtrage sur `published` relevant de la phase 3.
+    Filters **only** on `deleted_at`: the editorial status plays no part here,
+    filtering on `published` being a matter for phase 3.
     """
 
     def get_queryset(self) -> models.QuerySet[Entity]:
@@ -113,7 +113,7 @@ class ActiveEntityManager(models.Manager["Entity"]):
 
 
 class SourceKind(models.TextChoices):
-    """Nature d'une référence documentaire."""
+    """Nature of a documentary reference."""
 
     BOOK = "book", "Book"
     ARTICLE = "article", "Article"
@@ -124,20 +124,20 @@ class SourceKind(models.TextChoices):
 
 
 def string_array() -> ArrayField[list[str], list[str]]:
-    """Construit un `ArrayField` de courtes chaînes, vide par défaut.
+    """Build an `ArrayField` of short strings, empty by default.
 
-    Les listes symboliques de `Entity` et les listes des trois profils
-    partagent exactement la même définition ; la factoriser évite une
-    vingtaine de répétitions sans introduire d'abstraction de modèle.
+    The symbolic lists of `Entity` and the lists of the three profiles share
+    exactly the same definition; factoring it out avoids about twenty
+    repetitions without introducing a model abstraction.
     """
     return ArrayField(models.CharField(max_length=100), default=list, blank=True)
 
 
 def wrong_entity_type_error(profile_label: str, expected: str) -> ValidationError:
-    """Construit l'erreur de validation commune aux trois profils.
+    """Build the validation error shared by the three profiles.
 
-    Seul le message est factorisé : chaque profil garde son propre `clean()`
-    explicite, afin que la règle reste lisible à l'endroit où elle s'applique.
+    Only the message is factored out: each profile keeps its own explicit
+    `clean()`, so that the rule stays readable where it applies.
     """
     return ValidationError(
         {
@@ -150,12 +150,12 @@ def wrong_entity_type_error(profile_label: str, expected: str) -> ValidationErro
 
 
 class CulturalArea(models.Model):
-    """Aire culturelle : région africaine, portée transrégionale ou diaspora.
+    """Cultural area: African region, transregional scope or diaspora.
 
-    Référentiel, et jamais un type d'entité ni un profil métier. C'est ici que
-    sont classées les valeurs comme `Congo Basin`, `Pan-African` ou une
-    destination diasporique, que la décision 2 de l'ADR 0002 refuse d'inscrire
-    dans `Country`.
+    Reference data, and never an entity type nor a business profile. This is
+    where values such as `Congo Basin`, `Pan-African` or a diasporic
+    destination are classified, which decision 2 of ADR 0002 refuses to
+    record in `Country`.
     """
 
     name = models.CharField(max_length=255, unique=True)
@@ -184,14 +184,14 @@ class CulturalArea(models.Model):
         return self.name
 
     def clean(self) -> None:
-        """Interdit qu'une aire soit son propre parent direct.
+        """Forbid an area from being its own direct parent.
 
-        La règle est aussi posée en base par `cultural_area_parent_is_not_self`
-        ; ce `clean()` n'existe que pour produire un message lisible dans les
-        formulaires plutôt qu'une `IntegrityError`.
+        The rule is also enforced in the database by
+        `cultural_area_parent_is_not_self`; this `clean()` exists only to produce
+        a readable message in forms rather than an `IntegrityError`.
 
-        Aucune détection des cycles indirects — A → B → A — n'est tentée : ce
-        serait un moteur d'arbre, hors du périmètre de cet incrément.
+        No detection of indirect cycles - A to B to A - is attempted: that would
+        be a tree engine, out of the scope of this increment.
         """
         super().clean()
         if self.parent_id is not None and self.parent_id == self.pk:
@@ -201,11 +201,10 @@ class CulturalArea(models.Model):
 
 
 class Country(models.Model):
-    """Pays réel, identifié par son nom et son code ISO alpha-2 facultatif.
+    """Real country, identified by its name and its optional ISO alpha-2 code.
 
-    Ne contient que de véritables pays : `Pan-African`, `Congo Basin` et
-    `Diaspora` relèvent de `CulturalArea`, conformément à la décision 2 de
-    l'ADR 0002.
+    Holds genuine countries only: `Pan-African`, `Congo Basin` and `Diaspora`
+    belong to `CulturalArea`, as stated by decision 2 of ADR 0002.
     """
 
     name = models.CharField(max_length=255, unique=True)
@@ -233,33 +232,33 @@ class Country(models.Model):
         return self.name
 
     def save(self, *args: object, **kwargs: object) -> None:
-        """Normalise le code ISO lors d'un enregistrement par `save()`.
+        """Normalise the ISO code when saving through `save()`.
 
-        Placé ici plutôt que dans `clean()` seul, afin que la normalisation
-        s'applique aussi à un `objects.create()` direct.
-        `update()` et les opérations en masse contournent cette méthode.
+        Placed here rather than in `clean()` alone, so that the normalisation also
+        applies to a direct `objects.create()`. `update()` and bulk operations
+        bypass this method.
         """
         self.iso_code = self.normalized_iso_code()
         super().save(*args, **kwargs)  # type: ignore[arg-type]
 
     def normalized_iso_code(self) -> str:
-        """Retourne le code ISO sans espaces superflus et en majuscules."""
+        """Return the ISO code without stray spaces and in upper case."""
         return self.iso_code.strip().upper()
 
     def clean_fields(self, exclude: Collection[str] | None = None) -> None:
-        """Normalise le code avant les validateurs de champ et de longueur."""
+        """Normalise the code before the field and length validators."""
         if not exclude or "iso_code" not in exclude:
             self.iso_code = self.normalized_iso_code()
         super().clean_fields(exclude=exclude)
 
     def clean(self) -> None:
-        """Normalise le code ISO puis en valide le format.
+        """Normalise the ISO code, then validate its format.
 
-        La normalisation est répétée ici pour qu'un code saisi en minuscules
-        dans un formulaire soit accepté au lieu d'être rejeté par le contrôle
-        qui suit. Le contrôle de format, lui, n'est appliqué que par
-        `full_clean()` : `objects.create(iso_code="X1")` passerait, la seule
-        barrière de base étant la longueur maximale de deux caractères.
+        The normalisation is repeated here so that a code typed in lower case in a
+        form is accepted instead of being rejected by the check that follows. The
+        format check itself is only applied by `full_clean()`:
+        `objects.create(iso_code='X1')` would pass, the only database barrier
+        being the maximum length of two characters.
         """
         super().clean()
         self.iso_code = self.normalized_iso_code()
@@ -273,10 +272,10 @@ class Country(models.Model):
 
 
 class Ethnicity(models.Model):
-    """Ethnie, ancrage culturel principal d'une figure.
+    """Ethnicity, the main cultural anchor of a figure.
 
-    `primary_cultural_area` situe l'ethnie sans dupliquer les aires portées
-    par l'entité elle-même.
+    `primary_cultural_area` situates the ethnicity without duplicating the
+    areas carried by the entity itself.
     """
 
     name = models.CharField(max_length=255, unique=True)
@@ -299,10 +298,10 @@ class Ethnicity(models.Model):
 
 
 class Domain(models.Model):
-    """Domaine d'attribution, partagé par les trois types d'entités.
+    """Domain of attribution, shared by the three entity types.
 
-    Emplacement unique des domaines, conformément à la décision 4 de
-    l'ADR 0002 : aucun doublon dans les profils propres aux types.
+    The single location for domains, as stated by decision 4 of ADR 0002: no
+    duplicate inside the type-specific profiles.
     """
 
     name = models.CharField(max_length=255, unique=True)
@@ -318,21 +317,20 @@ class Domain(models.Model):
 
 
 class Entity(models.Model):
-    """Tronc commun à toutes les figures mythologiques.
+    """Common trunk of every mythological figure.
 
-    Porte les faits réutilisables quel que soit le type : identification,
-    récit, apparence et attributs symboliques. Les données propres à un type
-    vivent dans un profil relié en `OneToOne`.
+    Carries the facts that are reusable whatever the type: identification,
+    narrative, appearance and symbolic attributes. Type-specific data lives in
+    a profile linked through a `OneToOne`.
 
-    **Règle non encore appliquée.** L'ADR 0002 veut qu'une même valeur ne soit
-    pas à la fois ancrage principal et rattachement secondaire — par exemple
-    un pays présent dans `primary_country` et dans `secondary_countries`.
-    Cette règle n'est volontairement imposée nulle part ici. Un
-    `Model.clean()` ne la couvrirait pas : les sélections plusieurs-à-plusieurs
-    de l'administration sont enregistrées après la validation de l'instance,
-    si bien qu'une nouvelle valeur secondaire échapperait au contrôle. Aucun
-    signal global n'est ajouté pour autant. Son application appartiendra aux
-    services d'import et d'écriture, avant l'ouverture du CRUD.
+    **Rule not enforced yet.** ADR 0002 requires that one value not be both a
+    primary anchor and a secondary attachment - for instance a country present
+    in `primary_country` and in `secondary_countries`. That rule is
+    deliberately enforced nowhere here. A `Model.clean()` would not cover it:
+    the many-to-many selections of the admin are saved after the instance is
+    validated, so a new secondary value would escape the check. No global
+    signal is added for that purpose either. Enforcing it will belong to the
+    import and write services, before CRUD is opened.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -494,15 +492,15 @@ class Entity(models.Model):
         return self.name
 
     def clean(self) -> None:
-        """Interdit qu'une entité soit sa propre figure de référence.
+        """Forbid an entity from being its own reference figure.
 
-        La règle est garantie en base par `entity_variant_of_is_not_self` ; ce
-        `clean()` n'existe que pour produire un message lisible dans un
-        formulaire plutôt qu'une `IntegrityError`.
+        The rule is guaranteed in the database by
+        `entity_variant_of_is_not_self`; this `clean()` exists only to produce a
+        readable message in a form rather than an `IntegrityError`.
 
-        Les cycles indirects — A variante de B, B variante de A — ne sont
-        **pas** détectés : il faudrait un parcours récursif, hors du périmètre
-        de cet incrément.
+        Indirect cycles - A a variant of B, B a variant of A - are **not**
+        detected: that would require a recursive traversal, out of the scope of
+        this increment.
         """
         super().clean()
         if self.variant_of_id is not None and self.variant_of_id == self.pk:
@@ -512,11 +510,11 @@ class Entity(models.Model):
 
 
 class DivinityProfile(models.Model):
-    """Données propres aux divinités.
+    """Data specific to divinities.
 
-    Ne contient que le culte : les attributs symboliques communs restent sur
-    `Entity`, conformément à la décision 4 de l'ADR 0002 qui impose un
-    emplacement unique pour les domaines et les attributs partagés.
+    Holds the cult only: the shared symbolic attributes stay on `Entity`, as
+    stated by decision 4 of ADR 0002, which imposes a single location for
+    shared domains and attributes.
     """
 
     entity = models.OneToOneField(
@@ -538,14 +536,13 @@ class DivinityProfile(models.Model):
         return f"Divinity profile — {self.entity.name}"
 
     def clean(self) -> None:
-        """Interdit de rattacher ce profil à une entité d'un autre type.
+        """Forbid attaching this profile to an entity of another type.
 
-        Cette règle ne peut pas devenir une contrainte de base : elle porte sur
-        une colonne d'une autre table. Elle est donc appliquée par
-        `full_clean()`, donc par l'administration et par les formulaires. Un
-        appel direct à `objects.create()` ne la déclenche pas — la garantie
-        complète « une entité possède exactement le profil de son type »
-        viendra avec les services de création métier.
+        This rule cannot become a database constraint: it bears on a column of
+        another table. It is therefore enforced by `full_clean()`, and so by the
+        admin and by forms. A direct call to `objects.create()` does not trigger
+        it - the full guarantee that an entity owns exactly the profile of its
+        type will come with the business creation services.
         """
         super().clean()
         if (
@@ -556,11 +553,11 @@ class DivinityProfile(models.Model):
 
 
 class HeroProfile(models.Model):
-    """Données propres aux héros.
+    """Data specific to heroes.
 
-    Les alliés et les ennemis ne sont pas ici : ce sont des relations entre
-    entités, qui seront portées par `EntityRelation` dans un incrément
-    ultérieur de la phase 2.
+    Allies and enemies are not here: those are relations between entities,
+    which will be carried by `EntityRelation` in a later increment of
+    phase 2.
     """
 
     entity = models.OneToOneField(
@@ -583,14 +580,14 @@ class HeroProfile(models.Model):
         return f"Hero profile — {self.entity.name}"
 
     def clean(self) -> None:
-        """Interdit de rattacher ce profil à une entité d'un autre type."""
+        """Forbid attaching this profile to an entity of another type."""
         super().clean()
         if self.entity_id is not None and self.entity.entity_type != EntityType.HERO:
             raise wrong_entity_type_error("hero profile", EntityType.HERO)
 
 
 class CreatureProfile(models.Model):
-    """Données propres aux créatures."""
+    """Data specific to creatures."""
 
     entity = models.OneToOneField(
         Entity,
@@ -636,7 +633,7 @@ class CreatureProfile(models.Model):
         return f"Creature profile — {self.entity.name}"
 
     def clean(self) -> None:
-        """Interdit de rattacher ce profil à une entité d'un autre type."""
+        """Forbid attaching this profile to an entity of another type."""
         super().clean()
         if (
             self.entity_id is not None
@@ -646,28 +643,28 @@ class CreatureProfile(models.Model):
 
 
 class EntityRelation(models.Model):
-    """Lien orienté entre une figure et une autre, résolue ou simplement citée.
+    """Directed link from one figure to another, resolved or merely cited.
 
-    **Sens de lecture.** Le lien se lit toujours depuis `from_entity`, et
-    `kind` qualifie la cible :
+    **Reading direction.** The link always reads from `from_entity`, and
+    `kind` qualifies the target:
 
-    - `A — parent → B` signifie « B est un parent de A » ;
-    - `A — child → B` signifie « B est un enfant de A ».
+    - `A - parent -> B` means that B is a parent of A;
+    - `A - child -> B` means that B is a child of A.
 
-    Ce sens doit être respecté à l'import : l'inverser transformerait une
-    ascendance en descendance. Un descendant lointain n'est jamais converti en
-    enfant direct ; les cas ambigus seront signalés par le rapport d'import.
+    That direction must be respected at import time: reversing it would turn
+    an ascent into a descent. A distant descendant is never converted into a
+    direct child; ambiguous cases are reported by the import summary.
 
-    **Cible résolue ou citée.** Sur les 44 entités du corpus V2, les noms
-    cités dans `relations` désignent souvent des figures absentes. Exiger une
-    cible existante perdrait l'information ; `to_name` conserve donc le nom
-    brut. Une fois la fiche créée, le lien pourra être résolu explicitement. Aucun
-    rapprochement par nom n'est tenté : les noms sont culturellement ambigus
-    et une fusion automatique de fiches serait une perte de donnée.
+    **Resolved or cited target.** Across the 44 entities of the V2 corpus, the
+    names cited in `relations` often designate absent figures. Requiring an
+    existing target would lose that information; `to_name` therefore keeps the
+    raw name. Once the record exists, the link can be resolved explicitly. No
+    matching by name is attempted: names are culturally ambiguous and an
+    automatic merge of records would be a loss of data.
 
-    **Aucune relation inverse n'est créée.** `parent` n'engendre pas de
-    `child`, et une alliance n'engendre pas sa réciproque : une seule ligne
-    est écrite, celle que l'on a saisie.
+    **No inverse relation is created.** `parent` does not generate a `child`,
+    and an alliance does not generate its counterpart: a single row is
+    written, the one that was entered.
     """
 
     from_entity = models.ForeignKey(
@@ -724,14 +721,13 @@ class EntityRelation(models.Model):
         return f"{self.from_entity.name} — {self.kind} → {target}"
 
     def clean(self) -> None:
-        """Valide la cible, en doublant les contraintes d'un message lisible.
+        """Validate the target, mirroring the constraints with a readable message.
 
-        Les trois règles ci-dessous sont garanties en base par les
-        `CheckConstraint` ; ce `clean()` les rejoue pour que l'administration
-        affiche une erreur de formulaire au lieu d'une `IntegrityError`. La
-        quatrième — un nom composé uniquement d'espaces — n'existe qu'ici :
-        `"   "` n'est pas la chaîne vide, donc la contrainte de base le
-        laisserait passer.
+        The three rules below are guaranteed in the database by the
+        `CheckConstraint`s; this `clean()` replays them so that the admin shows a
+        form error instead of an `IntegrityError`. The fourth one - a name made of
+        spaces only - exists here only: a blank-filled string is not the empty
+        string, so the database constraint would let it through.
         """
         super().clean()
         self.to_name = self.to_name.strip()
@@ -756,30 +752,29 @@ class EntityRelation(models.Model):
 
 
 class Source(models.Model):
-    """Référence documentaire rattachée à une fiche.
+    """Documentary reference attached to a record.
 
-    Une source appartient à **une seule** entité ; une entité en possède zéro
-    ou plusieurs. La même référence bibliographique peut donc être saisie pour
-    plusieurs entités : il n'y a volontairement ni catalogue partagé ni
-    relation plusieurs-à-plusieurs à ce stade. Mutualiser les références
-    supposerait une identité bibliographique stable — édition, pagination,
-    tirage — que le corpus ne fournit pas.
+    A source belongs to **one single** entity; an entity owns zero or several.
+    The same bibliographic reference can therefore be entered for several
+    entities: there is deliberately neither a shared catalogue nor a
+    many-to-many relation at this stage. Sharing references would require a
+    stable bibliographic identity - edition, pagination, print run - that the
+    corpus does not provide.
 
-    `label` reste libre : titre d'ouvrage, nom de site, cote de musée ou
-    description d'un témoignage. Les précisions qui ne tiennent pas dans ce
-    libellé — auteur, pages, édition, contexte d'un entretien — vont dans
-    `notes`. Aucun champ bibliographique supplémentaire n'est créé : le corpus
-    V2 ne contient aujourd'hui **aucune** source, et inventer un modèle
-    bibliographique complet avant d'avoir une seule donnée réelle serait
-    prématuré.
+    `label` stays free: a book title, a site name, a museum reference number
+    or the description of a testimony. Details that do not fit in that label -
+    author, pages, edition, context of an interview - go into `notes`. No
+    extra bibliographic field is created: the V2 corpus currently holds **no**
+    source at all, and inventing a complete bibliographic model before having
+    a single real record would be premature.
 
-    Une source sans URL reste valide : un livre ou une tradition orale n'en a
-    pas. `accessed_at` est une date de **consultation**, non de publication ;
-    elle peut être renseignée sans URL, par exemple la date d'un entretien ou
-    d'une visite. Aucune valeur n'est remplie automatiquement.
+    A source without a URL stays valid: a book or an oral tradition has none.
+    `accessed_at` is a **consultation** date, not a publication date; it can
+    be filled in without a URL, for instance the date of an interview or of a
+    visit. No value is filled in automatically.
 
-    Aucune vérification réseau n'est effectuée : ni disponibilité de l'URL, ni
-    liste de domaines autorisés. Le format seul est validé.
+    No network check is performed: neither URL availability, nor a list of
+    allowed domains. The format alone is validated.
     """
 
     entity = models.ForeignKey(
@@ -806,14 +801,14 @@ class Source(models.Model):
         return f"{self.label} ({self.kind}) — {self.entity.name}"
 
     def clean(self) -> None:
-        """Refuse une référence composée uniquement d'espaces.
+        """Refuse a reference made of spaces only.
 
-        Portée exacte : cette règle n'existe qu'ici, donc elle ne s'applique
-        qu'à `full_clean()`, aux formulaires et à l'administration. `"   "`
-        n'est pas la chaîne vide, et aucune contrainte PostgreSQL ne
-        l'intercepte — `objects.create(label="   ")` serait accepté. De même,
-        le caractère obligatoire de `label` et de `kind` ainsi que le format
-        de l'URL sont vérifiés par la validation Django, et non par la base.
+        Exact scope: this rule exists here only, so it applies to `full_clean()`,
+        to forms and to the admin. A blank-filled string is not the empty string,
+        and no PostgreSQL constraint intercepts it - a direct create with a
+        blank-filled label would be accepted. Likewise, the mandatory nature of
+        `label` and `kind`, as well as the URL format, are checked by Django
+        validation and not by the database.
         """
         super().clean()
         self.label = self.label.strip()

@@ -2,14 +2,14 @@ from django.contrib.auth.models import AbstractUser
 
 
 class User(AbstractUser):
-    """Modèle utilisateur du projet.
+    """Project user model.
 
-    Volontairement minimal à ce stade : il hérite de `AbstractUser` sans champ
-    supplémentaire. Son seul rôle dans cet incrément est d'être déclaré via
-    `AUTH_USER_MODEL` dès la première migration, afin que les champs et les
-    profils métier ajoutés plus tard n'imposent pas de migration d'un modèle
-    utilisateur déjà en production.
+    Deliberately minimal at this stage: it inherits `AbstractUser` without any
+    extra field. Its only role in this increment is to be declared through
+    `AUTH_USER_MODEL` from the very first migration, so that the business
+    fields and profiles added later do not force a migration of an already
+    deployed user model.
 
-    La clé primaire est un `BigAutoField`, fixé par `DEFAULT_AUTO_FIELD` et par
+    The primary key is a `BigAutoField`, set by `DEFAULT_AUTO_FIELD` and by
     `AccountsConfig.default_auto_field`.
     """

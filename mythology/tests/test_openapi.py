@@ -48,7 +48,7 @@ def test_schema_is_available_anonymously(client: Client) -> None:
 def test_schema_is_parsable_and_declares_openapi_3(schema: dict[str, Any]) -> None:
     assert schema["openapi"].startswith("3.")
     assert schema["info"]["title"] == "Afrimyth API"
-    assert schema["info"]["version"] == "0.1.0"
+    assert schema["info"]["version"] == "1.0.0"
 
 
 @pytest.mark.parametrize("route", ["swagger-ui", "redoc"])

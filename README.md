@@ -1,30 +1,215 @@
 # afrimyth-api
 
-Django REST API for the Afrimyth project.
+**Afrimyth is a cultural project with an encyclopedic purpose, devoted to the
+mythologies of Africa and of its diasporas.** It gathers, in one structured
+place, what is told about divinities, heroes and creatures: where a figure is
+rooted, what it is said to govern, how it appears, who it is linked to, and
+which sources say so.
 
-## Requirements
+This repository holds `afrimyth-api`, the Django REST API behind that corpus.
+The API has two jobs: letting anyone **consult** what has been published, and
+letting an editorial team **contribute** to and review what has not been yet.
 
-- Python 3.12
-- PostgreSQL 14+
+> **Ambition and current scope are not the same thing.** The sections below
+> separate them deliberately. Afrimyth aims to become a durable reference;
+> what exists today is a working API, a data model exercised against a
+> historical corpus, and a local installation. There is no hosted public
+> instance, no published dataset and no finished encyclopedia.
 
-## Installation
+**What this project does not claim.** It is not exhaustive: African and
+diasporic mythologies are vast, plural and unevenly documented, and a corpus
+of a few dozen figures touches a fraction of them. It is not an editorial
+authority: the content reproduces and reorganises existing material, whose
+accuracy, spelling, classification and cultural framing stay under review.
+Several questions are knowingly left open rather than settled by software —
+which name is canonical, whether two close ethnonyms are the same, or how a
+cited descendant relates to a figure. The import report records unresolved
+mapping decisions, and a relation can cite a name when its target is missing.
+
+---
+
+## 1. Discover
+
+### What a record can document
+
+One record is one figure. Around it, the model holds four kinds of
+information:
+
+| | What it holds |
+|---|---|
+| **The figure** | Its name, its type — divinity, hero or creature —, an editorial subtitle, its gender, its cultural role, a narrative description, how it manifests, and symbolic attributes: signs, symbols, objects, animals |
+| **Its cultural context** | The country or countries it is attached to, the ethnicity it is anchored in, and the cultural area that situates it — an African region, a transregional scope such as pan-African, or a diasporic one |
+| **Its relations** | Links to other figures: parent, child, consort, ally, enemy. A link may point to a record that exists, or simply cite a name for a figure not yet documented |
+| **Its references** | Documentary sources: a book, an article, a website, a museum reference, an oral testimony, with optional URL, consultation date and notes |
+
+Beyond the common trunk, each type carries its own profile: a divinity has
+its cult — offerings, taboos, rites —, a hero has titles, achievements,
+artefacts and legacy, a creature has habitat, powers, strengths, weaknesses,
+diet, size and an optional threat level.
+
+A figure may also be recorded as a **cultural variant** of another: a
+regional form of the same figure, kept as its own record rather than merged,
+because the variation is itself part of what is documented.
+
+### Who it is for
+
+- **Readers** — anyone curious about these mythologies, who wants to browse
+  published figures without an account.
+- **Contributors** — people who write and correct records.
+- **Reviewers** — people who read submitted work and decide whether it is
+  published.
+- **Developers** — anyone wanting to build a client on top of a documented
+  HTTP contract.
+
+### From a draft to a published record
+
+Nothing becomes public by accident. A record travels through four states, and
+a person's role decides what they may do with it.
+
+```
+draft     ──submit──▶   submitted
+submitted ──withdraw──▶ draft
+submitted ──publish──▶  published
+submitted ──reject──▶   rejected
+rejected  ──resume──▶   draft
+published ──reopen──▶   draft
+```
+
+In plain words:
+
+- A **contributor** writes. They create a record, which starts as a private
+  **draft**, correct it freely, and **submit** it when they consider it
+  ready. While it is submitted they can still read it but no longer change
+  it — which is what makes a review meaningful. They may **withdraw** it to
+  get back to work.
+- A **reviewer** decides. They read everything that is not deleted, and
+  either **publish** a submitted record or **reject** it with a written
+  reason. Owning a record grants no right to publish it: writing and
+  approving are separate acts.
+- An **administrator** can do both, and two things more: **reopen** a
+  published record back to draft, and **restore** a record that was deleted.
+- A **rejected** record is not lost. Its author **resumes** it, keeps the
+  rejection note in view to guide corrections, and submits it again.
+
+The API marks deleted records and hides them from entity listings. An
+administrator can restore them through the API.
+
+### What a reader can consult today
+
+Only records that are **published and not deleted**. That rule holds for
+everyone — anonymous visitor, contributor, reviewer, administrator — because
+the public routes are public for all. A record that is not public and a name
+that does not exist give exactly the same answer, so a response never reveals
+that a hidden record exists.
+
+**A fresh installation legitimately shows nothing.** Imported records are
+created as drafts. Until someone publishes one, the public collection returns
+zero results and every public detail URL answers `404`. That is the system
+working as designed, not a failure.
+
+---
+
+## 2. Install
+
+Two independent paths. Pick one; they do not share a database.
+
+- **With Docker** — two containers, nothing to install on the machine beyond
+  Docker itself. Good for a first look.
+- **Without Docker** — a virtual environment plus a PostgreSQL you installed
+  yourself. Good if you intend to work on the code.
+
+Clone the repository first and work from its root:
 
 ```bash
+git clone https://github.com/hericlibong/afrimyth-api.git
+cd afrimyth-api
+```
+
+Everything below assumes that directory as the working directory.
+
+### Path A — with Docker
+
+**You need** Docker Desktop with its Linux engine running — it provides both
+`docker` and `docker compose`. Nothing else: PostgreSQL does not have to be
+installed on the host.
+
+**Prepare the local environment file.** Copy the example and replace its
+values. The real file is ignored by Git and never enters the image:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+**Start.** The first run builds the image, waits for the database to report
+healthy, applies the migrations, then serves HTTP:
+
+```bash
+docker compose --env-file .env.docker up -d --build
+```
+
+The API listens on **<http://127.0.0.1:8001>**, so a non-Docker installation
+keeps port 8000 for itself:
+
+| URL | What you get |
+|---|---|
+| <http://127.0.0.1:8001/api/health/> | `{"status": "ok"}` |
+| <http://127.0.0.1:8001/api/docs/> | Swagger UI — browse and run requests |
+| <http://127.0.0.1:8001/api/schema/> | The OpenAPI 3 schema, as YAML |
+| <http://127.0.0.1:8001/api/entities/> | The public collection — empty on a fresh install |
+
+**Stop**, keeping the data:
+
+```bash
+docker compose --env-file .env.docker down
+```
+
+The named volume survives, so restarting keeps the tables and the applied
+migrations. Adding `-v` would delete the database; do not use it to stop the
+services.
+
+**Optional administrative account.** Nothing creates one for you:
+
+```bash
+docker compose --env-file .env.docker exec api python manage.py createsuperuser
+```
+
+This setup runs the **Django development server**. It is meant for local work
+and makes no production promise: no reverse proxy, no WSGI server, no task
+queue.
+
+### Path B — without Docker
+
+**You need** Python 3.12 and PostgreSQL 14 or later, both already installed
+and running.
+
+```bash
+# Windows PowerShell
 py -3.12 -m venv .venv
-# Windows
 .venv\Scripts\activate
 # Linux / macOS
+python3.12 -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements-dev.txt
 cp .env.example .env   # then adjust the values
 ```
 
-## Environment variables
+Create the database and the role named in your `.env`, then:
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+The API listens on **<http://127.0.0.1:8000>**; the same four URLs as above
+apply on that port. Create an account with
+`python manage.py createsuperuser` when you need one.
+
+### Environment variables
 
 All environment-dependent settings are read from environment variables; in
-development they are loaded from a `.env` file at the repository root. Copy
-`.env.example` and adjust it.
+development they are loaded from a `.env` file at the repository root — or
+from `.env.docker` for the container path.
 
 | Variable | Notes |
 |---|---|
@@ -34,81 +219,228 @@ development they are loaded from a `.env` file at the repository root. Copy
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_HOST`, `POSTGRES_PORT` | Development defaults are provided |
 | `POSTGRES_PASSWORD` | **Required, no default** — a hard-coded default would quickly become the real password |
 
-Never commit a `.env` file or any real secret. `.env.example` holds
-placeholders only.
+Never commit a `.env` file or any real secret. `.env.example` and
+`.env.docker.example` hold placeholders only.
 
-## Running
+### A fresh installation has its own, empty database
 
-```bash
-python manage.py migrate
-python manage.py runserver
-```
+A new install creates its own database, with the tables and no content: no
+account, no reference data, no figure. Restarting does not reset it — the
+data persists — but nothing is seeded for you.
 
-The health endpoint is then available at
-<http://127.0.0.1:8000/api/health/> and returns `{"status": "ok"}`.
+### Importing the historical corpus
 
-## Running with Docker
+The project can import a historical V2 corpus of African mythological
+figures. **That corpus is not in this repository** and is not distributed
+with it: the import reads an external JSON file whose path you pass
+explicitly. Without that file there is nothing to import, and the
+installation stays empty until you create records through the API.
 
-An alternative local setup, with two containers: the Django API and
-PostgreSQL 16. It is **self-contained** — it never connects to a PostgreSQL
-instance installed on the host, and it uses its own database, its own volume
-and its own environment file. The local setup above is unaffected.
+Imported records arrive as **drafts**, with no owner and no review marks, so
+an import never publishes anything. See
+[Corpus import](#corpus-import) for the commands and the documented limits.
 
-This setup runs the **Django development server**. It is meant for local work
-only and makes no production promise: no reverse proxy, no WSGI server, no
-task queue.
+---
 
-**Requirements.** Docker Desktop with its Linux engine running, which provides
-both `docker` and `docker compose`.
+## 3. Try it
 
-**Prepare the local environment file.** Copy the example and replace its
-values; the real file is ignored by Git and never enters the image:
+Short, reproducible examples. **Every value below is fictitious** — invented
+for the demonstration, attributed to no tradition and belonging to no real
+corpus. Replace `8000` with `8001` if you started the Docker path.
 
-```bash
-cp .env.docker.example .env.docker
-```
+### What you need first
 
-**Start.** The database host is the Compose service name, so no host port is
-needed for PostgreSQL — it is deliberately not published:
+Reading needs nothing. Writing needs an account **and** an editorial role.
 
-```bash
-docker compose --env-file .env.docker up -d --build
-```
+The three groups — `contributor`, `reviewer`, `administrator` — are created
+by a migration, so they already exist after `migrate`. Create a superuser
+using the command for your installation above. Sign in at `/admin/` on the
+same port and use **Users** to create two ordinary accounts. Assign one to
+`contributor` and the other to `reviewer`. Keep both accounts active and
+leave their staff and superuser flags disabled. Use the original superuser
+for the administrator example. The HTTP examples below use Bash syntax.
 
-Compose waits for the database healthcheck, applies the migrations, then
-starts the HTTP service. The API listens on <http://127.0.0.1:8001>, so the
-local setup keeps port 8000 for itself:
+Roles are read from group membership on **every** request, never from the
+token, so a group change takes effect immediately with the same token.
 
-- health — <http://127.0.0.1:8001/api/health/>
-- Swagger UI — <http://127.0.0.1:8001/api/docs/>
-- OpenAPI schema — <http://127.0.0.1:8001/api/schema/>
-- public collection — <http://127.0.0.1:8001/api/entities/>
-
-**Expect an empty database.** No account and no corpus are created on
-startup. The public collection therefore returns zero results until content
-is imported and published, through the commands below, run manually.
-
-**Stop**, keeping the data of the volume:
+### Read, without an account
 
 ```bash
-docker compose --env-file .env.docker down
+curl http://127.0.0.1:8000/api/entities/
 ```
 
-The named volume survives, so restarting keeps the tables and the applied
-migrations. Adding `-v` would delete the database — do not use it to stop the
-services.
+Expected on a fresh install: `200` with
+`{"count": 0, "next": null, "previous": null, "results": []}` — the envelope
+is there, the corpus is empty. Once a record is published, it appears in
+`results`, and its detail is at `/api/entities/<slug>/`.
 
-**Optional administrative access.** Create an account manually when you need
-one; nothing creates it for you:
+Asking for a slug that is unpublished or unknown gives the same `404` in both
+cases.
+
+### Get a token
 
 ```bash
-docker compose --env-file .env.docker exec api python manage.py createsuperuser
+curl -X POST http://127.0.0.1:8000/api/auth/token/ \
+  -H "Content-Type: application/json" \
+  -d '{"username": "<your username>", "password": "<your password>"}'
 ```
 
-## API documentation
+Expected: `200` with an `access` and a `refresh` token. Send the access token
+as `Authorization: Bearer <access token>` on every request below. Check that
+it works with `GET /api/auth/me/`.
 
-Three routes serve the same generated OpenAPI schema. All are readable
-without logging in, like the API they describe.
+### Contribute — create a draft
+
+With an account in the `contributor` group:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Example Created Hero", "slug": "example-created-hero", "entity_type": "hero", "gender": "female", "hero_profile": {"titles": ["Synthetic title"]}}'
+```
+
+Expected: `201` with the private detail of the new record. The server imposes
+the owner — your account — and the `draft` status; neither can be supplied.
+The record is readable at once on `/api/manage/entities/` and **absent** from
+`/api/entities/`.
+
+Correct it with a partial update, which leaves every omitted field alone:
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/manage/entities/example-created-hero/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"cultural_role": "Synthetic role"}'
+```
+
+Add a documentary source — again, a fictitious one:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/sources/ \
+  -H "Authorization: Bearer <access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "Synthetic Reference, 2026", "kind": "book", "notes": "Fictitious entry for demonstration."}'
+```
+
+Then hand it over for review:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/submit/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+Expected: `200`, status `submitted`, `submitted_at` set by the server. These
+transition endpoints take **no body**. From now on the contributor can read
+the record but a further `PATCH` answers `403` — use `withdraw/` to get back
+to drafting.
+
+### Review — publish or reject
+
+With an account in the `reviewer` group:
+
+```bash
+# Publish, with an optional note
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/publish/ \
+  -H "Authorization: Bearer <reviewer access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"review_notes": "Fictitious approval note."}'
+```
+
+Expected: `200`, status `published`, `reviewed_at` and `reviewed_by` set by
+the server. The record now appears on the **public** collection — and public
+payloads never carry a review note.
+
+Rejecting instead requires a non-empty reason:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/reject/ \
+  -H "Authorization: Bearer <reviewer access token>" \
+  -H "Content-Type: application/json" \
+  -d '{"review_notes": "Fictitious reason: sources need checking."}'
+```
+
+Expected: `200` and status `rejected`; an empty reason answers `400`. The
+author then calls `resume/` to return to `draft`, keeping that note in view.
+
+**Owning a record does not grant publication.** A contributor calling
+`publish/` on its own record gets `403`.
+
+### Administer — delete logically, then restore
+
+Deletion with a `contributor` or `reviewer` token works on drafts and
+rejected records; restoration is for administrators only.
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/api/manage/entities/example-created-hero/ \
+  -H "Authorization: Bearer <access token>"
+```
+
+Expected: `204`. The record leaves both the public and the ordinary private
+listings, keeps its status, and no row is physically removed. A figure that
+still has an **active** cultural variant is protected and answers `400`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/manage/entities/example-created-hero/restore/ \
+  -H "Authorization: Bearer <administrator access token>"
+```
+
+Expected: `200`, the deletion marks cleared and the previous status kept — so
+a record deleted while published becomes public again. Any other role gets
+`403`.
+
+### At a glance
+
+| Action | Who may do it |
+|---|---|
+| Read published records | anyone, no account |
+| Read the editorial corpus | contributor (published + its own unpublished), reviewer, administrator |
+| Create a record | any editorial role |
+| Update a record | its own contributor on `draft`/`rejected`; a reviewer also on `submitted`; an administrator on anything not deleted |
+| Submit, withdraw, resume | the record's own contributor, a reviewer or an administrator |
+| Publish, reject | reviewer or administrator — **not** the owner as such |
+| Reopen a published record | administrator |
+| Delete logically | own contributor on `draft`/`rejected`; reviewer on any `draft`/`rejected`; administrator on any status |
+| Restore | administrator |
+
+An authenticated account with **no** editorial role is refused with `403` on
+every private route, even for a published record: reading published content
+is what the public routes are for. Being Django staff grants nothing here.
+
+The full matrix, payloads and error cases are in
+[Private editorial API](#private-editorial-api).
+
+---
+
+## 4. Understand the code
+
+### Layout
+
+| Path | What lives there |
+|---|---|
+| `config/` | Project settings, root URLs, the health endpoint |
+| `accounts/` | Custom user model, the three business-role groups, the JWT routes |
+| `mythology/models.py` | The domain: the `Entity` trunk, three profiles, four reference models, relations, sources |
+| `mythology/selectors.py` | **Visibility policy** — which records a given caller may read, public or private |
+| `mythology/services.py` | Creation of an entity together with the profile of its type, in one transaction |
+| `mythology/transitions.py` | The six editorial transitions and the role each one needs |
+| `mythology/deletion.py` | Logical deletion and restoration, with the variant protection |
+| `mythology/permissions.py` | Role check, then an object-level check for modification |
+| `mythology/serializers.py` | The public and private payloads |
+| `mythology/views.py` | The public and private viewsets |
+| `mythology/management/commands/` | The corpus import command |
+| `docs/` | Internal guides and per-increment reports, in French |
+
+Two deliberate choices are worth knowing before reading further. **Visibility
+lives in the queryset, not only in permissions**, because an object-level
+permission is never consulted for the records a list does not return.
+And **each rule is enforced at the level where it can be**: database
+constraints where a constraint is possible, Django validation where it is
+not — the docstrings say which, for each rule.
+
+### The generated OpenAPI schema
+
+Three routes serve the same schema, all readable without logging in:
 
 | Route | Purpose |
 |---|---|
@@ -116,43 +448,50 @@ without logging in, like the API they describe.
 | `/api/docs/` | Swagger UI — browse the endpoints and run requests with **Try it out** |
 | `/api/redoc/` | ReDoc — a reading-oriented rendering of the same schema |
 
-The schema itself is public, including the authentication endpoints: a client
-has to be able to read how to obtain a token before it holds one.
-
-No generated schema file is committed: the schema is produced from the code at request time.
+No schema file is committed: it is produced from the code at request time.
 To generate and validate it locally:
 
 ```bash
 python manage.py spectacular --file schema.yml --validate --fail-on-warn
 ```
 
-The command fails on generator warnings and schema validation errors. It
-complements the contract tests; it does not detect every mismatch with runtime
-behaviour. CI integration is planned for the delivery phase.
+The command fails on generator warnings and validation errors. It complements
+the contract tests; it does not detect every mismatch with runtime behaviour.
 
-**Using Swagger UI.** The entity list, entity detail and health operations
-are `GET` and need no credentials.
-Expand an operation, press **Try it out**, optionally fill the collection's
-query parameters, then **Execute**. On a database holding only unpublished
-drafts, the collection answers `200` with zero results and any detail slug
-answers `404` — see the visibility rule below. No write method is offered on
+**Using Swagger UI.** The entity list, entity detail and health operations are
+`GET` and need no credentials. Expand an operation, press **Try it out**,
+optionally fill the collection's query parameters, then **Execute**. On a
+database holding only unpublished drafts, the collection answers `200` with
+zero results and any detail slug answers `404`. No write method is offered on
 the public entity routes, because none exists.
 
-**Authenticating in Swagger UI.** `GET /api/auth/me/` and every
-`/api/manage/` operation require a token; everything else is open.
-Run `POST /api/auth/token/` first, copy the `access` value from the response,
-press **Authorize**, paste it, then execute the protected operation. Paste the
-token alone: Swagger adds the `Bearer ` prefix itself. The public operations
-stay available whether or not you are authorised — authenticating changes
-nothing about what they return.
+**Authenticating in Swagger UI.** `GET /api/auth/me/` and every `/api/manage/`
+operation require a token; everything else is open. Run
+`POST /api/auth/token/` first, copy the `access` value, press **Authorize**,
+paste it, then execute the protected operation. Paste the token alone:
+Swagger adds the `Bearer ` prefix itself.
 
 **CDN dependency.** Swagger UI and ReDoc load their JavaScript and CSS from a
 public CDN. Without internet access the HTML page is still served but will
 not render. No offline bundle is shipped, as no such need has been
-established.
-ReDoc is pinned to version 2.5.3, compatible with the classic-script template
-provided by drf-spectacular; it does not follow the CDN's `latest` alias.
+established. ReDoc is pinned to version 2.5.3, compatible with the
+classic-script template provided by drf-spectacular; it does not follow the
+CDN's `latest` alias.
 
+### Running the checks
+
+Four commands cover tests, lint, formatting and types; coverage and
+continuous integration run the same set. The commands, their prerequisite and
+the coverage threshold are under [Verification](#verification).
+
+### Reference
+
+The sections that follow are the detailed contract — route by route, payload
+by payload, with the error cases. They are reference material, not a first
+read: start with **Try it** above, and come back here when you need the exact
+behaviour.
+
+---
 ## Two read contracts
 
 The corpus is served by two distinct pairs of routes, and they never mix.
@@ -1052,8 +1391,37 @@ logical deletion of a record and its restoration.
 The public routes stay read-only. Full replacement stays refused, and the
 reclassification of an entity's type is not implemented yet.
 
+Phase 5 covers the corpus import. The pilot command was extended with an
+explicit `--all` option, and the full historical corpus was imported into the
+local database as drafts: existing records were skipped rather than
+overwritten, and re-running the command adds nothing. The mapping decisions
+it could not settle — a country name that does not identify one country,
+close ethnonyms, debatable domain synonyms, the direction of a cited
+descendant — are reported by the command instead of being resolved.
+
+Phase 6 covers the local setup and the release. A Dockerfile and a two-service
+Compose file start the API and PostgreSQL locally; one GitHub Actions workflow
+runs lint, formatting, types, the Django checks, the schema validation and the
+tests with coverage on pull requests and on pushes to `main`; and this README
+was rewritten for a reader discovering the project.
+
+**Version.** This release is `1.0.0`, declared in `pyproject.toml` and
+reported as `info.version` in the OpenAPI schema. It names the delivery, not
+a version of the contract: the routes stay under `/api/` with no version
+segment, and no version negotiation is exposed. A future breaking change
+would therefore need a versioning scheme that does not exist yet.
+
 The Django administration is a trusted technical maintenance tool, not the
 editorial interface. Its entity forms do not enforce the API's type/profile
 pairing and still allow physical deletion. These limitations are documented
 and deferred; normal editorial work uses the API. A separate basic editorial
 interface will use these API permissions later, outside the corpus import.
+
+**Older records are never repaired by the import**, and a database that was
+populated before the current rules can hold two kinds of leftovers: an entity
+saved without the profile of its type, which the API then refuses to update
+with an explicit `400`, and relations that still cite a name although the
+matching record exists today. Both are deliberate: the import skips an
+existing record entirely rather than rewriting it, so correcting such records
+is a separate editorial operation. A fresh installation starts empty and has
+neither.

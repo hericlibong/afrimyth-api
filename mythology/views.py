@@ -170,13 +170,13 @@ class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     search_fields = ["name", "category", "cultural_role", "story_description"]
 
     def filter_queryset(self, queryset: QuerySet[Entity, Any]) -> QuerySet[Entity, Any]:
-        """N'applique les filtres de collection qu'à la liste.
+        """Apply the collection filters to the list only.
 
-        Sans cette garde, DRF appliquerait aussi `SearchFilter` dans
-        `get_object()` : `GET /api/entities/shango/?search=introuvable`
-        renverrait alors 404 pour une fiche parfaitement visible. Les
-        paramètres de collection ne doivent jamais changer la disponibilité du
-        détail, qui ne dépend que de la politique appliquée au slug demandé.
+        Without this guard, DRF would also apply `SearchFilter` in
+        `get_object()`: `GET /api/entities/shango/?search=notfound` would then
+        return 404 for a perfectly visible record. Collection parameters must
+        never change the availability of the detail, which depends only on the
+        policy applied to the requested slug.
         """
         if self.action != "list":
             return queryset
@@ -185,10 +185,10 @@ class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     # --- Validation des paramètres de collection ------------------------
 
     def _query_param(self, name: str) -> str | None:
-        """Retourne le paramètre nettoyé, ou `None` s'il est vide.
+        """Return the cleaned parameter, or `None` when it is empty.
 
-        Un paramètre présent mais vide — `?entity_type=` — ne filtre pas,
-        plutôt que de ne rien retourner.
+        A parameter that is present but empty - `?entity_type=` - does not
+        filter, rather than returning nothing.
         """
         raw = self.request.query_params.get(name)
         if raw is None:
@@ -197,7 +197,7 @@ class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
         return cleaned or None
 
     def _validated_entity_type(self) -> str | None:
-        """Valide `entity_type` contre les trois valeurs techniques connues."""
+        """Validate `entity_type` against the three known technical values."""
         value = self._query_param("entity_type")
         if value is None:
             return None
@@ -214,10 +214,11 @@ class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
         return value
 
     def _validated_country(self) -> str | None:
-        """Valide le format du code pays et le normalise en majuscules.
+        """Validate the country code format and normalise it to upper case.
 
-        Seul le **format** est vérifié : un code bien formé mais absent de la
-        base donne une liste vide, sans révéler quels pays sont enregistrés.
+        Only the **format** is checked: a well-formed code that is absent from
+        the database yields an empty list, without revealing which countries are
+        recorded.
         """
         value = self._query_param("country")
         if value is None:
@@ -265,35 +266,35 @@ class EntityNavigationViewSet(viewsets.ReadOnlyModelViewSet[Entity]):
     ),
 )
 class EntityViewSet(EntityNavigationViewSet):
-    """Collection et détail **publics** des entités, identifiées par leur slug.
+    """**Public** collection and detail of entities, identified by their slug.
 
-    Ne sont visibles que les fiches `published` et non supprimées
-    logiquement. La règle est la même pour tous les appelants — anonyme,
-    connecté, relecteur, superutilisateur — parce que ces routes sont
-    publiques et non des routes privées de gestion : détenir un jeton de
-    relecteur ne change rien à ce qu'elles renvoient. `AllowAny` surcharge le
-    défaut `IsAuthenticated` du projet.
+    Only `published` records that have not been logically deleted are
+    visible. The rule is the same for every caller - anonymous,
+    authenticated, reviewer, superuser - because these routes are public and
+    not private management routes: holding a reviewer token changes nothing
+    about what they return. `AllowAny` overrides the project default
+    `IsAuthenticated`.
 
-    Une fiche non publique et un slug inexistant renvoient le même **404**,
-    sans message distinguant l'un de l'autre : la réponse ne doit pas révéler
-    l'existence ni l'état éditorial d'une fiche masquée.
+    A non-public record and an unknown slug return the same **404**, with no
+    message telling them apart: the response must not reveal the existence
+    nor the editorial status of a hidden record.
 
-    **Navigation.** Héritée d'`EntityNavigationViewSet` : la collection est
-    paginée et accepte `search`, `entity_type`, `country` et `cultural_area`.
-    Ces paramètres ne s'appliquent qu'à la liste.
+    **Navigation.** Inherited from `EntityNavigationViewSet`: the collection
+    is paginated and accepts `search`, `entity_type`, `country` and
+    `cultural_area`. These parameters apply to the list only.
     """
 
     permission_classes = [AllowAny]
 
     def get_queryset(self) -> QuerySet[Entity]:
-        """Sélection publique, filtrée pour la liste, enrichie pour le détail.
+        """Public selection, filtered for the list, enriched for the detail.
 
-        Les deux actions partent de la même règle de visibilité, définie dans
-        `mythology.selectors`. Le détail y ajoute les jointures et
-        préchargements, dont les relations sortantes **déjà filtrées**, et
-        ignore les paramètres de collection. La liste applique les filtres et
-        reste nue, puisqu'elle n'expose ni profil, ni référentiel, ni
-        relation, ni source.
+        Both actions start from the same visibility rule, defined in
+        `mythology.selectors`. The detail adds the joins and prefetches,
+        including the **already filtered** outgoing relations, and ignores the
+        collection parameters. The list applies the filters and stays bare,
+        since it exposes neither profile, nor reference data, nor relation, nor
+        source.
         """
         if self.action == "retrieve":
             return public_entity_detail()

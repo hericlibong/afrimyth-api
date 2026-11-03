@@ -1,4 +1,4 @@
-"""Point d'entrée ASGI."""
+"""ASGI entry point."""
 
 import os
 

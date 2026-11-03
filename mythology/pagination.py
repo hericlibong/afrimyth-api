@@ -1,19 +1,19 @@
-"""Pagination de la collection publique.
+"""Pagination of the public collection.
 
-Taille fixe et numéro de page : le contrat le plus simple à documenter et à
-consommer. Aucun paramètre de taille n'est exposé, ce qui évite qu'un client
-demande une page de dix mille fiches.
+Fixed size and page number: the simplest contract to document and to
+consume. No size parameter is exposed, which prevents a client from
+requesting a page of ten thousand records.
 """
 
 from rest_framework.pagination import PageNumberPagination
 
 
 class EntityPagination(PageNumberPagination):
-    """Vingt fiches par page, taille non négociable par le client.
+    """Twenty records per page, a size the client cannot negotiate.
 
-    L'enveloppe est celle de DRF — `count`, `next`, `previous`, `results` —
-    et le comportement standard est conservé pour une page inexistante, qui
-    renvoie 404.
+    The envelope is the DRF one - `count`, `next`, `previous`, `results` -
+    and the standard behaviour is kept for a non-existent page, which
+    returns 404.
     """
 
     page_size = 20

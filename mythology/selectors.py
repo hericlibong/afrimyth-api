@@ -15,40 +15,40 @@ PUBLIC_FILTER = Q(status=EntityStatus.PUBLISHED, deleted_at__isnull=True)
 
 
 def public_entities() -> QuerySet[Entity]:
-    """Fiches visibles publiquement : publiées et non supprimées.
+    """Publicly visible records: published and not deleted.
 
-    Part de `Entity.objects`, le manager complet, et applique la règle
-    éditoriale ici plutôt que dans un manager : `Entity.active` garde sa
-    portée — la seule suppression logique — et l'administration conserve son
-    queryset complet.
+    Starts from `Entity.objects`, the full manager, and applies the editorial
+    rule here rather than in a manager: `Entity.active` keeps its own scope -
+    logical deletion only - and the admin keeps its full queryset.
 
-    La règle est la même pour tous les appelants, anonymes comme connectés,
-    superutilisateur compris : ces routes sont publiques, pas des routes
-    privées de gestion.
+    The rule is the same for every caller, anonymous or authenticated,
+    superuser included: these routes are public, not private management
+    routes.
 
-    **Ordre déterministe** : `name` puis `id`, ce dernier départageant deux
-    figures homonymes. Sans lui, deux fiches de même nom pourraient changer de
-    page d'une requête à l'autre, et la pagination deviendrait instable.
-    L'ordre est posé ici plutôt que dans `Meta.ordering`, afin de ne pas
-    modifier l'ordre par défaut du modèle ni générer de migration.
+    **Deterministic order**: `name` then `id`, the latter breaking ties
+    between two homonymous figures. Without it, two records sharing a name
+    could move from one page to another between requests, and pagination
+    would become unstable. The order is set here rather than in
+    `Meta.ordering`, so as not to change the model default or generate a
+    migration.
     """
     return Entity.objects.filter(PUBLIC_FILTER).order_by("name", "id")
 
 
 def descendant_area_ids(slug: str) -> set[int]:
-    """Identifiants d'une aire culturelle et de tous ses descendants.
+    """Identifiers of a cultural area and of all its descendants.
 
-    La hiérarchie est lue dans `parent`, telle qu'elle est **réellement
-    enregistrée** : aucun nom de région n'est codé en dur, et la traversée
-    fonctionne sur autant de niveaux que la base en contient.
+    The hierarchy is read from `parent`, exactly as it is **actually
+    recorded**: no region name is hard-coded, and the traversal works on as
+    many levels as the database holds.
 
-    La descente est itérative, niveau par niveau — une requête par niveau —
-    et chaque identifiant déjà vu est exclu des suivants. Un cycle
-    accidentel dans `parent` ne provoque donc pas de boucle infinie, sans
-    qu'il soit nécessaire de modifier le modèle pour l'interdire.
+    The descent is iterative, level by level - one query per level - and
+    every identifier already seen is excluded from the next ones. An
+    accidental cycle in `parent` therefore does not cause an infinite loop,
+    without having to change the model to forbid it.
 
-    Retourne un ensemble vide si le slug ne correspond à aucune aire : c'est
-    ce qui fait qu'un slug inconnu donne une liste vide plutôt qu'une erreur.
+    Returns an empty set when the slug matches no area: that is what makes an
+    unknown slug yield an empty list rather than an error.
     """
     root = CulturalArea.objects.filter(slug=slug).values_list("pk", flat=True).first()
     if root is None:
@@ -111,17 +111,17 @@ def filter_entities(
 
 
 def public_relations() -> QuerySet[EntityRelation]:
-    """Relations sortantes exposables dans une fiche publique.
+    """Outgoing relations that a public record may expose.
 
-    Deux cas sont conservés :
+    Two cases are kept:
 
-    - les liens **non résolus**, qui ne citent qu'un nom (`to_entity` nul) ;
-    - les liens dont la cible résolue est elle-même publique.
+    - **unresolved** links, which only cite a name (`to_entity` is null);
+    - links whose resolved target is itself public.
 
-    Un lien vers une cible résolue non publique est **entièrement omis** :
-    ni son identifiant, ni son type, ni ses notes ne sont exposés, et son nom
-    n'est pas recopié dans `to_name` — ce qui reviendrait à republier la cible
-    masquée sous une autre forme.
+    A link towards a resolved non-public target is **omitted entirely**:
+    neither its identifier, nor its type, nor its notes are exposed, and its
+    name is not copied into `to_name` - which would amount to republishing
+    the hidden target in another form.
     """
     return EntityRelation.objects.select_related("to_entity").filter(
         Q(to_entity__isnull=True)
@@ -163,11 +163,11 @@ DETAIL_PREFETCH_RELATED = (
 
 
 def public_entity_detail() -> QuerySet[Entity]:
-    """Queryset du détail public : visibilité, jointures et préchargements.
+    """Queryset of the public detail: visibility, joins and prefetches.
 
-    Les relations sortantes sont préchargées **déjà filtrées** par
-    `public_relations()`, de sorte que la réponse ne puisse pas être
-    construite depuis une collection non filtrée.
+    Outgoing relations are prefetched **already filtered** by
+    `public_relations()`, so that the response cannot be built from an
+    unfiltered collection.
     """
     return (
         public_entities()
@@ -180,11 +180,11 @@ def public_entity_detail() -> QuerySet[Entity]:
 
 
 def is_publicly_visible(entity: Entity | None) -> bool:
-    """Indique si une instance déjà chargée est publiquement visible.
+    """Tell whether an already loaded instance is publicly visible.
 
-    Même règle que `PUBLIC_FILTER`, évaluée en Python. Sert de garde au
-    serializer pour les références déjà jointes — `variant_of`, cible d'une
-    relation — sans déclencher de requête supplémentaire.
+    Same rule as `PUBLIC_FILTER`, evaluated in Python. Acts as a guard for
+    the serializer on already joined references - `variant_of`, a relation
+    target - without triggering an extra query.
     """
     if entity is None:
         return False

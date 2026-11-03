@@ -1,13 +1,13 @@
-"""Tests de la commande `import_mythology_pilot`.
+"""Tests of the `import_mythology_pilot` command.
 
-**Autonomes** : aucun test ne lit le corpus réel. Chaque cas écrit son propre
-JSON synthétique dans un répertoire temporaire, de forme équivalente au
-corpus V2 mais à contenu inventé. Les tests restent donc exécutables sans le
-dossier `_audit`.
+**Self-contained**: no test reads the real corpus. Each case writes its
+own synthetic JSON into a temporary directory, shaped like the V2 corpus
+but with invented content. The tests therefore stay runnable without the
+`_audit` directory.
 
-Les trois noms de la sélection — `Oya`, `Anansi`, `Mokele-mbembe` — sont en
-revanche repris tels quels, puisque c'est précisément la sélection que la
-commande applique.
+The three names of the selection - `Oya`, `Anansi`, `Mokele-mbembe` - are
+on the other hand kept as they are, since that is precisely the selection
+the command applies.
 """
 
 import json
@@ -55,7 +55,7 @@ pytestmark = pytest.mark.django_db
 
 
 def synthetic_divinity(**overrides: Any) -> dict[str, Any]:
-    """Divinité synthétique, de forme identique au corpus V2."""
+    """A synthetic divinity, shaped exactly like the V2 corpus."""
     data: dict[str, Any] = {
         "entity_type": "Divinity",
         "name": "Oya",
@@ -101,7 +101,7 @@ def synthetic_divinity(**overrides: Any) -> dict[str, Any]:
 
 
 def synthetic_hero(**overrides: Any) -> dict[str, Any]:
-    """Héros synthétique."""
+    """A synthetic hero."""
     data: dict[str, Any] = {
         "entity_type": "Hero",
         "name": "Anansi",
@@ -140,7 +140,7 @@ def synthetic_hero(**overrides: Any) -> dict[str, Any]:
 
 
 def synthetic_creature(**overrides: Any) -> dict[str, Any]:
-    """Créature synthétique, dont l'origine est une aire et non un pays."""
+    """A synthetic creature, whose origin is an area and not a country."""
     data: dict[str, Any] = {
         "entity_type": "Creature",
         "name": "Mokele-mbembe",
@@ -182,14 +182,14 @@ def synthetic_creature(**overrides: Any) -> dict[str, Any]:
 
 
 def write_corpus(tmp_path: Path, entries: list[dict[str, Any]]) -> str:
-    """Écrit un corpus synthétique et retourne son chemin."""
+    """Write a synthetic corpus and return its path."""
     path = tmp_path / "synthetic_corpus.json"
     path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
     return str(path)
 
 
 def full_corpus(tmp_path: Path, **kwargs: Any) -> str:
-    """Corpus synthétique complet : les trois fiches de la sélection."""
+    """A complete synthetic corpus: the three records of the selection."""
     return write_corpus(
         tmp_path,
         [synthetic_divinity(**kwargs), synthetic_hero(), synthetic_creature()],
@@ -200,7 +200,7 @@ def full_corpus(tmp_path: Path, **kwargs: Any) -> str:
 
 
 def test_clean_list_ecarte_les_marqueurs_d_absence() -> None:
-    """`["None"]` est une absence, pas un objet de pouvoir."""
+    """A placeholder list is an absence, not a power object."""
     notes: list[str] = []
 
     assert clean_list(["None", "Real"], label="x", notes=notes) == ["Real"]
@@ -222,7 +222,7 @@ def test_clean_list_signale_une_valeur_nulle() -> None:
 
 
 def test_clean_list_signale_une_forme_inattendue() -> None:
-    """Une chaîne au lieu d'une liste est signalée, pas devinée."""
+    """A string instead of a list is reported, not guessed."""
     notes: list[str] = []
 
     assert clean_list("Wind", label="x", notes=notes) == []
@@ -230,7 +230,7 @@ def test_clean_list_signale_une_forme_inattendue() -> None:
 
 
 def test_clean_list_conserve_l_unicode() -> None:
-    """Les caractères non ASCII traversent l'import sans altération."""
+    """Non-ASCII characters go through the import unaltered."""
     notes: list[str] = []
 
     assert clean_list(["Ṣàngó", "Mmuo"], label="x", notes=notes) == ["Ṣàngó", "Mmuo"]
@@ -244,7 +244,7 @@ def test_clean_text_signale_une_valeur_nulle() -> None:
 
 
 def test_domaines_reconcilies_avec_correction() -> None:
-    """Union dédupliquée, `Ceteris` corrigé, synonymes conservés."""
+    """Deduplicated union, `Ceteris` corrected, synonyms kept."""
     notes: list[str] = []
     item = {
         "attributes": {"domains": ["Wind", "Cemeteries", "Transformation"]},
@@ -260,7 +260,7 @@ def test_domaines_reconcilies_avec_correction() -> None:
 
 
 def test_domaines_sans_bloc_divinite() -> None:
-    """L'absence du bloc `divinity` n'est pas signalée comme une anomalie."""
+    """A missing `divinity` block is not reported as an anomaly."""
     notes: list[str] = []
     item = {"attributes": {"domains": ["Stories"]}, "type_specific": {"hero": {}}}
 
@@ -272,7 +272,7 @@ def test_domaines_sans_bloc_divinite() -> None:
 
 
 def test_import_des_trois_types(tmp_path: Path) -> None:
-    """Les trois fiches sont créées, chacune avec son seul profil."""
+    """The three records are created, each with its single profile."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     oya = Entity.objects.get(slug="oya")
@@ -290,7 +290,7 @@ def test_import_des_trois_types(tmp_path: Path) -> None:
 
 
 def test_les_champs_du_tronc_commun_sont_conserves(tmp_path: Path) -> None:
-    """Textes et listes du tronc commun arrivent intacts en base."""
+    """Texts and lists of the common trunk reach the database intact."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     oya = Entity.objects.get(slug="oya")
@@ -308,7 +308,7 @@ def test_les_champs_du_tronc_commun_sont_conserves(tmp_path: Path) -> None:
 
 
 def test_les_profils_recoivent_leurs_champs(tmp_path: Path) -> None:
-    """Chaque profil reçoit les champs de son bloc `type_specific`."""
+    """Each profile receives the fields of its `type_specific` block."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     oya = Entity.objects.get(slug="oya")
@@ -327,7 +327,7 @@ def test_les_profils_recoivent_leurs_champs(tmp_path: Path) -> None:
 
 
 def test_les_fiches_importees_sont_en_draft(tmp_path: Path) -> None:
-    """Aucun statut public, aucun propriétaire, aucune marque de revue."""
+    """No public status, no owner, no review mark."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     for entity in Entity.objects.all():
@@ -340,7 +340,7 @@ def test_les_fiches_importees_sont_en_draft(tmp_path: Path) -> None:
 
 
 def test_les_donnees_de_rendu_ne_sont_pas_importees(tmp_path: Path) -> None:
-    """`rendering`, le prompt d'image et `imageUrl` restent hors du modèle."""
+    """`rendering`, the image prompt and `imageUrl` stay out of the model."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     oya = Entity.objects.get(slug="oya")
@@ -356,7 +356,7 @@ def test_les_donnees_de_rendu_ne_sont_pas_importees(tmp_path: Path) -> None:
 
 
 def test_les_aires_de_reference_sont_preparees(tmp_path: Path) -> None:
-    """Les quatre régions, la diaspora et la sous-région sont créées."""
+    """The four regions, the diaspora and the sub-region are created."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     noms = set(CulturalArea.objects.values_list("name", flat=True))
@@ -374,7 +374,7 @@ def test_les_aires_de_reference_sont_preparees(tmp_path: Path) -> None:
 
 
 def test_la_sous_region_est_rattachee_a_sa_region(tmp_path: Path) -> None:
-    """`Congo Basin` est une région africaine dont le parent est Central Africa."""
+    """`Congo Basin` is an African region whose parent is Central Africa."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     congo = CulturalArea.objects.get(name="Congo Basin")
@@ -385,10 +385,10 @@ def test_la_sous_region_est_rattachee_a_sa_region(tmp_path: Path) -> None:
 
 
 def test_une_aire_geographique_ne_devient_pas_un_pays(tmp_path: Path) -> None:
-    """`Congo Basin` n'entre pas dans `Country` et laisse le pays nul.
+    """`Congo Basin` does not enter `Country` and leaves the country null.
 
-    C'est la décision 2 de l'ADR 0002 : seuls de véritables pays sont
-    enregistrés comme tels.
+    This is decision 2 of ADR 0002: only genuine countries are recorded as
+    such.
     """
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
@@ -403,7 +403,10 @@ def test_une_aire_geographique_ne_devient_pas_un_pays(tmp_path: Path) -> None:
 
 
 def test_les_pays_et_ethnies_sont_crees(tmp_path: Path) -> None:
-    """Pays avec code ISO de la table explicite ; ethnies sans aire déduite."""
+    """Countries carry the ISO code of the explicit table.
+
+    Ethnicities get no inferred area.
+    """
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     nigeria = Country.objects.get(name="Nigeria")
@@ -417,7 +420,7 @@ def test_les_pays_et_ethnies_sont_crees(tmp_path: Path) -> None:
 
 
 def test_origine_composite_scinde_principal_et_secondaires(tmp_path: Path) -> None:
-    """Le premier pays réel est principal, les suivants secondaires."""
+    """The first real country is primary, the following ones secondary."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -442,7 +445,7 @@ def test_origine_composite_scinde_principal_et_secondaires(tmp_path: Path) -> No
 
 
 def test_aucun_doublon_entre_principal_et_secondaire(tmp_path: Path) -> None:
-    """Un pays répété ne se retrouve pas à la fois principal et secondaire."""
+    """A repeated country does not end up both primary and secondary."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -467,7 +470,7 @@ def test_aucun_doublon_entre_principal_et_secondaire(tmp_path: Path) -> None:
 
 
 def test_ethnie_vague_est_signalee_et_non_creee(tmp_path: Path) -> None:
-    """`Multi-ethnic` est signalée, pas inscrite comme ethnie réelle."""
+    """`Multi-ethnic` is reported, not recorded as a real ethnicity."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -491,7 +494,7 @@ def test_ethnie_vague_est_signalee_et_non_creee(tmp_path: Path) -> None:
 
 
 def test_les_domaines_sont_dedupliques_et_corriges(tmp_path: Path) -> None:
-    """L'union des domaines est appliquée à la fiche importée."""
+    """The union of domains is applied to the imported record."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
 
     oya = Entity.objects.get(slug="oya")
@@ -502,7 +505,7 @@ def test_les_domaines_sont_dedupliques_et_corriges(tmp_path: Path) -> None:
 
 
 def test_referentiel_existant_divergent_n_est_pas_reecrit(tmp_path: Path) -> None:
-    """Un pays déjà présent avec un autre code ISO est conservé tel quel."""
+    """A country already present with another ISO code is kept as it is."""
     Country.objects.create(name="Nigeria", slug="nigeria", iso_code="XX")
 
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
@@ -515,7 +518,7 @@ def test_referentiel_existant_divergent_n_est_pas_reecrit(tmp_path: Path) -> Non
 
 
 def test_cible_absente_reste_dans_to_name(tmp_path: Path) -> None:
-    """Un nom cité hors du pilote est conservé, non résolu."""
+    """A name cited outside the pilot is kept, unresolved."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -542,10 +545,10 @@ def test_cible_absente_reste_dans_to_name(tmp_path: Path) -> None:
 
 
 def test_resolution_en_deux_passes(tmp_path: Path) -> None:
-    """Une référence vers une autre fiche du pilote est résolue.
+    """A reference towards another pilot record is resolved.
 
-    C'est la démonstration de la seconde passe : `Anansi` est créé après
-    `Oya`, et le lien d'Oya vers lui n'en est pas moins résolu.
+    This demonstrates the second pass: `Anansi` is created after `Oya`, and
+    the link from Oya towards it is resolved nonetheless.
     """
     corpus = write_corpus(
         tmp_path,
@@ -575,7 +578,7 @@ def test_resolution_en_deux_passes(tmp_path: Path) -> None:
 def test_cible_du_pilote_deja_presente_est_resolue_sans_modification(
     tmp_path: Path,
 ) -> None:
-    """Recréer une source peut viser une cible du pilote déjà importée."""
+    """Recreating a source may target an already imported pilot record."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -603,7 +606,7 @@ def test_cible_du_pilote_deja_presente_est_resolue_sans_modification(
 
 
 def test_parent_inattendu_d_une_region_racine_est_signale(tmp_path: Path) -> None:
-    """Un parent existant est préservé mais signalé si une racine est attendue."""
+    """An existing parent is preserved but reported when a root is expected."""
     parent = CulturalArea.objects.create(
         name="Synthetic Parent", slug="synthetic-parent", kind="african_region"
     )
@@ -621,10 +624,10 @@ def test_parent_inattendu_d_une_region_racine_est_signale(tmp_path: Path) -> Non
 
 
 def test_aucun_rapprochement_avec_une_fiche_preexistante(tmp_path: Path) -> None:
-    """Une fiche homonyme déjà en base ne résout pas la cible.
+    """A homonymous record already in the database does not resolve the target.
 
-    `Shango` existe historiquement ; le lien d'Oya vers « Shango » reste
-    pourtant non résolu, et la fiche historique n'est pas touchée.
+    `Shango` exists historically; the link from Oya towards that name stays
+    unresolved nonetheless, and the historical record is left untouched.
     """
     shango = create_entity(name="Shango", slug="shango")
     corpus = write_corpus(
@@ -651,7 +654,7 @@ def test_aucun_rapprochement_avec_une_fiche_preexistante(tmp_path: Path) -> None
 
 
 def test_descendants_ne_sont_pas_convertis(tmp_path: Path) -> None:
-    """`descendants` n'est pas transformé en lien `child`."""
+    """`descendants` is not turned into a `child` link."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -674,7 +677,7 @@ def test_descendants_ne_sont_pas_convertis(tmp_path: Path) -> None:
 
 
 def test_aucun_lien_inverse_n_est_cree(tmp_path: Path) -> None:
-    """Résoudre une cible ne crée pas de relation réciproque."""
+    """Resolving a target does not create a reciprocal relation."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -693,7 +696,7 @@ def test_aucun_lien_inverse_n_est_cree(tmp_path: Path) -> None:
 
 
 def test_doublon_exact_de_relation_est_dedoublonne(tmp_path: Path) -> None:
-    """Un nom cité deux fois ne produit qu'un seul lien."""
+    """A name cited twice produces a single link."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -739,7 +742,7 @@ def test_racine_non_liste_donne_une_erreur_lisible(tmp_path: Path) -> None:
 
 
 def test_selection_incomplete_donne_une_erreur(tmp_path: Path) -> None:
-    """Il manque Mokele-mbembe : la commande refuse d'importer à moitié."""
+    """Mokele-mbembe is missing: the command refuses to import halfway."""
     corpus = write_corpus(tmp_path, [synthetic_divinity(), synthetic_hero()])
 
     with pytest.raises(CommandError, match="selection incomplete"):
@@ -764,7 +767,7 @@ def test_nom_duplique_dans_le_corpus_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_type_inattendu_donne_une_erreur(tmp_path: Path) -> None:
-    """Oya déclarée `Creature` : la commande refuse plutôt que d'obéir."""
+    """Oya declared as a `Creature`: the command refuses rather than comply."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -779,7 +782,7 @@ def test_type_inattendu_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_genre_inconnu_donne_une_erreur(tmp_path: Path) -> None:
-    """Un genre hors table n'est pas deviné."""
+    """A gender outside the table is not guessed."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -802,7 +805,7 @@ def test_genre_inconnu_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_aire_inconnue_donne_une_erreur(tmp_path: Path) -> None:
-    """Une région hors des aires préparées n'est pas inventée."""
+    """A region outside the prepared areas is not invented."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -823,10 +826,10 @@ def test_aire_inconnue_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_depassement_de_longueur_est_signale_sans_troncature(tmp_path: Path) -> None:
-    """Un élément de liste trop long fait échouer la validation, sans tronquer.
+    """A list item that is too long fails validation, without truncation.
 
-    Le modèle limite les éléments à 100 caractères. La valeur n'est pas
-    coupée en silence : la création échoue et l'appel est annulé.
+    The model limits items to 100 characters. The value is not cut silently:
+    the creation fails and the call is rolled back.
     """
     trop_long = "X" * 150
     corpus = write_corpus(
@@ -847,9 +850,9 @@ def test_depassement_de_longueur_est_signale_sans_troncature(tmp_path: Path) -> 
 
 
 def test_erreur_sur_une_fiche_annule_tout_l_appel(tmp_path: Path) -> None:
-    """Une erreur sur la troisième fiche annule aussi les référentiels.
+    """An error on the third record rolls back the reference data as well.
 
-    C'est la garantie transactionnelle : l'appel n'apporte rien du tout.
+    This is the transactional guarantee: the call brings nothing at all.
     """
     corpus = write_corpus(
         tmp_path,
@@ -880,7 +883,7 @@ def test_erreur_sur_une_fiche_annule_tout_l_appel(tmp_path: Path) -> None:
 
 
 def test_dry_run_n_apporte_rien(tmp_path: Path) -> None:
-    """La simulation valide et tente les écritures, puis annule tout."""
+    """The simulation validates and attempts the writes, then rolls everything back."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path), dry_run=True)
 
     assert Entity.objects.count() == 0
@@ -891,7 +894,7 @@ def test_dry_run_n_apporte_rien(tmp_path: Path) -> None:
 
 
 def test_relance_ne_duplique_pas(tmp_path: Path) -> None:
-    """Un second appel ignore les trois fiches au lieu de les recréer."""
+    """A second call skips the three records instead of recreating them."""
     corpus = full_corpus(tmp_path)
     call_command("import_mythology_pilot", input=corpus)
 
@@ -904,7 +907,7 @@ def test_relance_ne_duplique_pas(tmp_path: Path) -> None:
 
 
 def test_relance_preserve_une_fiche_modifiee(tmp_path: Path) -> None:
-    """Une modification entre deux appels n'est pas écrasée."""
+    """A change made between two calls is not overwritten."""
     corpus = full_corpus(tmp_path)
     call_command("import_mythology_pilot", input=corpus)
 
@@ -924,7 +927,7 @@ def test_relance_preserve_une_fiche_modifiee(tmp_path: Path) -> None:
 
 
 def test_relance_ne_duplique_pas_les_relations(tmp_path: Path) -> None:
-    """Une fiche ignorée ne voit pas ses liens recréés."""
+    """A skipped record does not see its links recreated."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -945,7 +948,7 @@ def test_relance_ne_duplique_pas_les_relations(tmp_path: Path) -> None:
 def test_relance_ne_touche_pas_les_collections_d_une_fiche_ignoree(
     tmp_path: Path,
 ) -> None:
-    """Les référentiels rattachés à une fiche ignorée restent inchangés."""
+    """The reference data attached to a skipped record stays unchanged."""
     corpus = full_corpus(tmp_path)
     call_command("import_mythology_pilot", input=corpus)
 
@@ -958,9 +961,9 @@ def test_relance_ne_touche_pas_les_collections_d_une_fiche_ignoree(
 
 
 def test_conflit_de_slug_donne_une_erreur(tmp_path: Path) -> None:
-    """Un slug déjà pris par une autre figure est un conflit explicite.
+    """A slug already taken by another figure is an explicit conflict.
 
-    Aucun suffixage arbitraire : la commande s'arrête.
+    No arbitrary suffixing: the command stops.
     """
     create_entity(name="Autre figure", slug="oya")
 
@@ -971,7 +974,7 @@ def test_conflit_de_slug_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_conflit_de_nom_et_type_donne_une_erreur(tmp_path: Path) -> None:
-    """Même nom et même type sous un autre slug : conflit explicite."""
+    """Same name and same type under another slug: an explicit conflict."""
     create_entity(name="Oya", slug="oya-autre")
 
     with pytest.raises(CommandError, match="identity conflict"):
@@ -979,7 +982,7 @@ def test_conflit_de_nom_et_type_donne_une_erreur(tmp_path: Path) -> None:
 
 
 def test_fiche_preexistante_sans_profil_est_preservee(tmp_path: Path) -> None:
-    """La fiche historique sans profil n'est ni réparée ni supprimée."""
+    """The historical record without a profile is neither repaired nor deleted."""
     shango = create_entity(name="Shango", slug="shango")
 
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
@@ -998,7 +1001,7 @@ def test_fiche_preexistante_sans_profil_est_preservee(tmp_path: Path) -> None:
 
 
 def test_api_de_detail_d_une_fiche_importee(client: Client, tmp_path: Path) -> None:
-    """Le détail d'une fiche importée expose bien ses données et ses liens."""
+    """The detail of an imported record does expose its data and its links."""
     corpus = write_corpus(
         tmp_path,
         [
@@ -1030,7 +1033,7 @@ def test_api_de_detail_d_une_fiche_importee(client: Client, tmp_path: Path) -> N
 
 
 def test_api_de_detail_de_la_creature_importee(client: Client, tmp_path: Path) -> None:
-    """La créature importée expose son aire précise et aucun pays."""
+    """The imported creature exposes its precise area and no country."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
     publish(Entity.objects.get(slug="mokele-mbembe"))
 
@@ -1049,7 +1052,7 @@ def test_detail_d_une_fiche_importee_coute_sept_requetes(
     tmp_path: Path,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le budget du détail reste de sept requêtes sur une fiche réelle importée."""
+    """The detail budget stays at seven queries on a real imported record."""
     call_command("import_mythology_pilot", input=full_corpus(tmp_path))
     publish(Entity.objects.get(slug="oya"))
 
@@ -1063,9 +1066,9 @@ def test_fiche_importee_se_serialise_sans_requete(
     tmp_path: Path,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le queryset de la vue fournit tout au serializer, sans requête résiduelle.
+    """The view queryset supplies the serializer, with no residual query.
 
-    C'est ce test, et non le budget global, qui prouve le préchargement.
+    It is this test, and not the overall budget, that proves the prefetching.
     """
     corpus = write_corpus(
         tmp_path,

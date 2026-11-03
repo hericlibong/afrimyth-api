@@ -143,11 +143,11 @@ EXCLUDED_SOURCE_KEYS: dict[str, str] = {
 
 
 def clean_list(values: Any, *, label: str, notes: list[str]) -> list[str]:
-    """Normalise une liste de chaînes du corpus.
+    """Normalise a list of strings coming from the corpus.
 
-    Retire les espaces de bord, écarte les marqueurs d'absence et déduplique
-    en conservant l'ordre d'apparition. Chaque retrait est signalé : un
-    `["None"]` doit se lire comme une absence, pas devenir un fait.
+    Strips edge whitespace, discards the absence markers and deduplicates
+    while keeping the order of appearance. Every removal is reported: a
+    placeholder list must read as an absence, not become a fact.
     """
     if values is None:
         notes.append(f"{label}: null value replaced by an empty list.")
@@ -181,7 +181,7 @@ def clean_list(values: Any, *, label: str, notes: list[str]) -> list[str]:
 
 
 def clean_text(value: Any, *, label: str, notes: list[str]) -> str:
-    """Normalise un champ textuel ; une valeur nulle devient une chaîne vide."""
+    """Normalise a text field; a null value becomes an empty string."""
     if value is None:
         notes.append(f"{label}: null value replaced by an empty string.")
         return ""
@@ -196,10 +196,10 @@ def clean_text(value: Any, *, label: str, notes: list[str]) -> str:
 def check_array_item_lengths(
     values: Sequence[str], *, label: str, notes: list[str], limit: int = 100
 ) -> None:
-    """Signale tout élément dépassant la longueur du champ, sans tronquer.
+    """Report any item longer than the field, without truncating.
 
-    Tronquer altérerait silencieusement une donnée réelle ; mieux vaut un
-    signalement et, si le cas se présente, une migration ciblée.
+    Truncating would silently alter a real record; a report is preferable,
+    followed by a targeted migration should the case arise.
     """
     for value in values:
         if len(value) > limit:
@@ -212,11 +212,11 @@ def check_array_item_lengths(
 def reconcile_domains(
     item: Mapping[str, Any], *, name: str, notes: list[str]
 ) -> list[str]:
-    """Union dédupliquée des domaines communs et des domaines de divinité.
+    """Deduplicated union of the shared domains and the divinity domains.
 
-    Décision 4 de l'ADR 0002 : `Entity.domains` est l'emplacement unique.
-    L'union évite la perte constatée à l'audit, où aucun des deux
-    emplacements n'était un sur-ensemble de l'autre.
+    Decision 4 of ADR 0002: `Entity.domains` is the single location. The union
+    avoids the loss observed during the audit, where neither of the two
+    locations was a superset of the other.
     """
     common = clean_list(
         item.get("attributes", {}).get("domains"),
@@ -388,7 +388,7 @@ class Command(BaseCommand):
     # --- Chargement et sélection ----------------------------------------
 
     def _load_corpus(self, path: Path) -> list[Mapping[str, Any]]:
-        """Charge le corpus, avec des erreurs lisibles."""
+        """Load the corpus, with readable errors."""
         if not path.is_file():
             raise CommandError(f"Corpus file not found: {path}")
         try:
@@ -409,7 +409,7 @@ class Command(BaseCommand):
     def _select_pilot(
         self, corpus: Sequence[Mapping[str, Any]]
     ) -> dict[str, Mapping[str, Any]]:
-        """Isole les trois fiches du pilote et vérifie leur unicité et leur type."""
+        """Isolate the three pilot records and check their uniqueness and type."""
         selected: dict[str, Mapping[str, Any]] = {}
         for name, expected_type in PILOT_SELECTION.items():
             matches = [item for item in corpus if item.get("name") == name]
@@ -470,11 +470,11 @@ class Command(BaseCommand):
     # --- Identité et relance --------------------------------------------
 
     def _find_existing(self, item: Mapping[str, Any], *, name: str) -> Entity | None:
-        """Retourne la fiche déjà présente, ou lève en cas de conflit d'identité.
+        """Return the record already present, or raise on an identity conflict.
 
-        Concordance complète — nom, type et slug — : la fiche est ignorée.
-        Concordance partielle : c'est un conflit, signalé comme erreur plutôt
-        que contourné par un suffixe de slug arbitraire.
+        Full match - name, type and slug: the record is skipped. Partial match:
+        that is a conflict, reported as an error rather than worked around with
+        an arbitrary slug suffix.
         """
         entity_type = ENTITY_TYPES[str(item["entity_type"])]
         slug = slugify(name)
@@ -505,7 +505,7 @@ class Command(BaseCommand):
     # --- Référentiels ----------------------------------------------------
 
     def _ensure_base_cultural_areas(self, notes: list[str]) -> dict[str, CulturalArea]:
-        """Crée ou réutilise les aires de référence, parents d'abord."""
+        """Create or reuse the reference areas, parents first."""
         areas: dict[str, CulturalArea] = {}
         for name, kind, parent_name in BASE_CULTURAL_AREAS:
             parent = areas.get(parent_name) if parent_name else None
@@ -585,7 +585,7 @@ class Command(BaseCommand):
     def _warn_reference_conflict(
         self, existing: Any, expected: Mapping[str, Any], *, notes: list[str]
     ) -> None:
-        """Signale un référentiel existant divergent, sans le réécrire."""
+        """Report a diverging existing reference row, without rewriting it."""
         for field, value in expected.items():
             current = getattr(existing, field)
             if (field == "parent_id" or value not in (None, "")) and current != value:
@@ -605,7 +605,7 @@ class Command(BaseCommand):
         areas: Mapping[str, CulturalArea],
         notes: list[str],
     ) -> Entity:
-        """Transforme puis crée une fiche et son profil, via le service."""
+        """Transform then create a record and its profile, through the service."""
         entity_type = ENTITY_TYPES[str(item["entity_type"])]
         origin = item.get("origin", {})
         identity = item.get("identity", {})
@@ -725,7 +725,7 @@ class Command(BaseCommand):
         areas: Mapping[str, CulturalArea],
         notes: list[str],
     ) -> tuple[Country | None, list[Country], CulturalArea | None]:
-        """Résout pays principal, pays secondaires et aire principale."""
+        """Resolve the primary country, the secondary countries and the main area."""
         raw_country = clean_text(
             origin.get("country"), label=f"{name}.origin.country", notes=notes
         )
@@ -783,7 +783,7 @@ class Command(BaseCommand):
     def _resolve_ethnicity(
         self, origin: Mapping[str, Any], *, name: str, notes: list[str]
     ) -> Ethnicity | None:
-        """Résout l'ethnie principale, en écartant les valeurs vagues."""
+        """Resolve the primary ethnicity, discarding vague values."""
         raw = clean_text(
             origin.get("ethnicity"), label=f"{name}.origin.ethnicity", notes=notes
         )
@@ -805,10 +805,10 @@ class Command(BaseCommand):
         name: str,
         notes: list[str],
     ) -> dict[str, Any]:
-        """Extrait les seuls champs métier de `type_specific` pour le bon profil.
+        """Extract only the business fields of `type_specific` for the right profile.
 
-        Les clés absentes ne sont pas fournies : le profil utilise alors ses
-        propres valeurs par défaut, sans qu'une absence devienne un fait.
+        Missing keys are not supplied: the profile then uses its own default
+        values, without an absence becoming a fact.
         """
         specific = item.get("type_specific", {}) or {}
         if entity_type == EntityType.DIVINITY:
@@ -879,7 +879,7 @@ class Command(BaseCommand):
         )
 
     def _drop_empty(self, data: Mapping[str, Any]) -> dict[str, Any]:
-        """Retire les valeurs vides afin de laisser jouer les défauts du modèle."""
+        """Remove empty values so that the model defaults apply."""
         return {key: value for key, value in data.items() if value not in ([], "")}
 
     # --- Relations, seconde passe ---------------------------------------
@@ -893,18 +893,18 @@ class Command(BaseCommand):
         notes: list[str],
         deferred_descendants: dict[str, list[str]],
     ) -> list[str]:
-        """Crée les relations sortantes de la fiche.
+        """Create the outgoing relations of the record.
 
-        Le sens suit celui du modèle : `parents` donne des liens `parent` dont
-        la cible est le parent de la fiche, `conjoint` donne des `consort`.
-        `descendants` n'est **pas** converti : rien ne garantit qu'un nom cité
-        soit un enfant direct plutôt qu'un descendant lointain.
+        The direction follows the model: `parents` yields `parent` links whose
+        target is the parent of the record, `conjoint` yields `consort` links.
+        `descendants` is **not** converted: nothing guarantees that a cited name
+        is a direct child rather than a distant descendant.
 
-        Seules les références exactes vers les fiches **de l'appel** sont
-        résolues. Aucun rapprochement n'est tenté avec les fiches
-        préexistantes hors sélection. Une cible de la sélection déjà présente
-        peut être utilisée après concordance explicite de son nom, type et
-        slug, sans modifier sa fiche ni ses propres liens.
+        Only exact references to the records **of this call** are resolved. No
+        matching is attempted against pre-existing records outside the selection.
+        A target of the selection that is already present may be used after an
+        explicit match of its name, type and slug, without modifying its record
+        nor its own links.
         """
         relations = item.get("relations", {}) or {}
         created: list[str] = []

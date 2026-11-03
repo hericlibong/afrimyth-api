@@ -1,10 +1,10 @@
-"""Tests des champs de plateforme de `Entity` et des deux managers.
+"""Tests of the platform fields of `Entity` and of the two managers.
 
-Ces champs sont **posés, non pilotés** : aucune transition, aucun service,
-aucune permission n'existe encore. Les tests ci-dessous vérifient donc le
-schéma, les valeurs par défaut, la validation des choix et la portée des
-managers — pas un workflow. Le marquage de `deleted_at` y est une préparation
-explicite par l'ORM, pas l'appel d'un service métier.
+Those fields are **declared, not driven**: no transition, no service and
+no permission exists yet. The tests below therefore check the schema, the
+default values, the validation of choices and the scope of the managers -
+not a workflow. Marking `deleted_at` here is an explicit preparation made
+through the ORM, not a call to a business service.
 """
 
 import datetime
@@ -25,7 +25,7 @@ pytestmark = pytest.mark.django_db
 
 
 def create_user(username: str = "contributor") -> User:
-    """Crée un compte de test, sans groupe ni rôle — ceux-ci viendront en phase 4."""
+    """Create a test account, with no group or role - those come in phase 4."""
     return User.objects.create_user(username=username, password="test-password")
 
 
@@ -33,7 +33,7 @@ def create_user(username: str = "contributor") -> User:
 
 
 def test_valeurs_par_defaut_des_champs_de_plateforme() -> None:
-    """Une fiche naît en `draft`, sans propriétaire ni trace de revue."""
+    """A record is born in `draft`, with no owner and no review trace."""
     entity = create_entity()
 
     entity.refresh_from_db()
@@ -50,7 +50,7 @@ def test_valeurs_par_defaut_des_champs_de_plateforme() -> None:
 
 @pytest.mark.parametrize("status", EntityStatus.values)
 def test_les_quatre_statuts_sont_acceptes(status: str) -> None:
-    """Les quatre valeurs prévues passent `full_clean()`."""
+    """The four intended values pass `full_clean()`."""
     entity = create_entity(status=status)
 
     entity.full_clean()
@@ -59,11 +59,11 @@ def test_les_quatre_statuts_sont_acceptes(status: str) -> None:
 
 
 def test_statut_inconnu_refuse_par_full_clean() -> None:
-    """Un statut hors liste est rejeté par la validation Django.
+    """A status outside the list is rejected by Django validation.
 
-    Portée exacte : `full_clean()` seulement. Aucune contrainte PostgreSQL ne
-    limite les valeurs de `status` — `objects.create(status="archived")`
-    serait accepté en base, ce que fixe le test suivant.
+    Exact scope: `full_clean()` only. No PostgreSQL constraint limits the
+    values of `status` - a direct create with an unknown status would be
+    accepted by the database, which the next test pins down.
     """
     entity = create_entity(status="archived")
 
@@ -74,10 +74,10 @@ def test_statut_inconnu_refuse_par_full_clean() -> None:
 
 
 def test_statut_inconnu_passe_en_ecriture_directe() -> None:
-    """Documente la limite : la base n'énumère pas les statuts.
+    """Document the limit: the database does not enumerate the statuses.
 
-    Ce test fixe le comportement réel plutôt que de laisser croire à une
-    garantie structurelle.
+    This test pins the real behaviour down rather than letting a structural
+    guarantee be assumed.
     """
     entity = create_entity(status="archived")
 
@@ -87,10 +87,10 @@ def test_statut_inconnu_passe_en_ecriture_directe() -> None:
 
 
 def test_aucun_statut_deleted() -> None:
-    """La suppression logique n'est pas un statut éditorial.
+    """Logical deletion is not an editorial status.
 
-    Une fiche supprimée conserve l'état qu'elle avait : les deux notions sont
-    portées séparément.
+    A deleted record keeps the state it had: the two notions are carried
+    separately.
     """
     assert "deleted" not in EntityStatus.values
     assert EntityStatus.values == ["draft", "submitted", "published", "rejected"]
@@ -100,10 +100,10 @@ def test_aucun_statut_deleted() -> None:
 
 
 def test_attribution_explicite_des_trois_acteurs() -> None:
-    """Les trois acteurs, horodatages et notes se posent explicitement.
+    """The three actors, timestamps and notes are set explicitly.
 
-    Rien n'est rempli automatiquement : c'est le test qui fournit chaque
-    valeur, comme le feront les services de la phase 4.
+    Nothing is filled in automatically: the test supplies every value, as the
+    phase 4 services will.
     """
     auteur = create_user("author")
     relecteur = create_user("reviewer")
@@ -130,11 +130,11 @@ def test_attribution_explicite_des_trois_acteurs() -> None:
 
 
 def test_related_names_distincts_pour_les_trois_acteurs() -> None:
-    """Les trois relations utilisateur sont déclarées et lisibles séparément.
+    """The three user relations are declared and readable separately.
 
-    Deux vérifications complémentaires : les accesseurs inverses existent et
-    sont distincts — sans quoi Django refuserait le modèle —, et chacun
-    retrouve bien la fiche attendue.
+    Two complementary checks: the reverse accessors exist and are distinct -
+    otherwise Django would refuse the model - and each one does find the
+    expected record.
     """
     utilisateur = create_user()
     create_entity(name="A", slug="a", created_by=utilisateur)
@@ -158,7 +158,7 @@ def test_related_names_distincts_pour_les_trois_acteurs() -> None:
 
 
 def test_aucun_horodatage_metier_n_est_rempli_automatiquement() -> None:
-    """Créer puis enregistrer une fiche ne pose aucune date métier."""
+    """Creating then saving a record sets no business date."""
     entity = create_entity()
     entity.status = EntityStatus.SUBMITTED
     entity.save()
@@ -172,11 +172,10 @@ def test_aucun_horodatage_metier_n_est_rempli_automatiquement() -> None:
 
 
 def test_suppression_d_un_utilisateur_conserve_la_fiche() -> None:
-    """`SET_NULL` : supprimer un compte vide les FK sans toucher la fiche.
+    """`SET_NULL`: deleting an account empties the FKs without touching the record.
 
-    Une date historique peut donc subsister avec un acteur devenu nul, ce qui
-    est exactement la raison pour laquelle aucune contrainte ne lie acteur,
-    date et statut.
+    A historical date can therefore survive with an actor that became null,
+    which is exactly why no constraint ties actor, date and status together.
     """
     utilisateur = create_user()
     revu_le = timezone.now()
@@ -202,18 +201,17 @@ def test_suppression_d_un_utilisateur_conserve_la_fiche() -> None:
 
 
 def test_manager_par_defaut_est_complet() -> None:
-    """`objects`, déclaré en premier, est le manager par défaut.
+    """`objects`, declared first, is the default manager.
 
-    Conséquence voulue par l'ADR 0002 : ni l'administration, ni le parcours
-    des relations, ni une future restauration ne masquent silencieusement de
-    lignes.
+    A consequence intended by ADR 0002: neither the admin, nor the traversal
+    of relations, nor a future restoration silently hides rows.
     """
     assert isinstance(Entity._default_manager, models.Manager)
     assert Entity._default_manager.name == "objects"
 
 
 def test_objects_voit_les_fiches_supprimees() -> None:
-    """Le manager complet comprend les lignes supprimées logiquement."""
+    """The full manager includes logically deleted rows."""
     create_entity(name="Visible", slug="visible")
     supprimee = create_entity(name="Supprimée", slug="supprimee")
     supprimee.deleted_at = timezone.now()
@@ -234,10 +232,10 @@ def test_active_exclut_uniquement_les_fiches_supprimees() -> None:
 
 @pytest.mark.parametrize("status", EntityStatus.values)
 def test_active_ne_depend_pas_du_statut(status: str) -> None:
-    """Une fiche active reste visible du manager quel que soit son statut.
+    """An active record stays visible to the manager whatever its status.
 
-    Le filtrage sur `published` appartient à la phase 3 ; `active` ne porte
-    que sur la suppression logique.
+    Filtering on `published` belongs to phase 3; `active` bears on logical
+    deletion only.
     """
     create_entity(status=status)
 
@@ -245,7 +243,7 @@ def test_active_ne_depend_pas_du_statut(status: str) -> None:
 
 
 def test_active_ignore_la_valeur_de_deleted_by() -> None:
-    """Seule `deleted_at` compte : `deleted_by` seul ne masque rien."""
+    """Only `deleted_at` counts: `deleted_by` alone hides nothing."""
     entity = create_entity()
     entity.deleted_by = create_user()
     entity.save()
@@ -257,9 +255,9 @@ def test_active_ignore_la_valeur_de_deleted_by() -> None:
 
 
 def test_administration_voit_les_fiches_supprimees() -> None:
-    """Le queryset de `EntityAdmin` conserve les lignes supprimées.
+    """The queryset of `EntityAdmin` keeps the deleted rows.
 
-    C'est la condition pour qu'une restauration soit possible en phase 4.
+    That is the condition for a restoration to be possible in phase 4.
     """
     visible = create_entity(name="Visible", slug="visible")
     supprimee = create_entity(name="Supprimée", slug="supprimee")
@@ -278,7 +276,7 @@ def test_administration_voit_les_fiches_supprimees() -> None:
 
 
 def test_champs_en_lecture_seule_de_l_administration() -> None:
-    """Les horodatages de workflow et `deleted_by` ne sont pas saisissables."""
+    """The workflow timestamps and `deleted_by` cannot be entered."""
     admin = EntityAdmin(Entity, AdminSite())
 
     assert "submitted_at" in admin.readonly_fields

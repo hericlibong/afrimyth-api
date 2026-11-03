@@ -16,7 +16,7 @@ from config import settings as project_settings
 
 
 def test_modele_utilisateur_personnalise_est_actif() -> None:
-    """Le projet utilise bien le modèle utilisateur de l'app `accounts`."""
+    """The project does use the user model of the `accounts` app."""
     assert settings.AUTH_USER_MODEL == "accounts.User"
 
 

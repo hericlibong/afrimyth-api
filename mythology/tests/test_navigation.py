@@ -1,8 +1,8 @@
-"""Tests de la navigation dans la collection publique.
+"""Tests of the navigation inside the public collection.
 
-Pagination, recherche et filtres. Toutes les fiches sont **synthétiques et
-publiées dans la base de test** : les brouillons réels du corpus ne sont
-jamais publiés pour illustrer ces fonctions.
+Pagination, search and filters. Every record is **synthetic and published
+in the test database**: the real drafts of the corpus are never published
+to illustrate these features.
 """
 
 from collections.abc import Callable
@@ -29,14 +29,14 @@ LIST_URL = reverse("entity-list")
 
 
 def slugs_of(response_json: dict[str, object]) -> list[str]:
-    """Extrait les slugs de `results`, dans l'ordre de la réponse."""
+    """Extract the slugs of `results`, in the order of the response."""
     results = response_json["results"]
     assert isinstance(results, list)
     return [item["slug"] for item in results]
 
 
 def publish_many(count: int, *, prefix: str = "figure") -> None:
-    """Crée `count` fiches publiées, nommées de façon ordonnable."""
+    """Create `count` published records, named so that they can be ordered."""
     for index in range(count):
         create_published_entity(
             name=f"{prefix} {index:03d}", slug=f"{prefix}-{index:03d}"
@@ -47,9 +47,9 @@ def publish_many(count: int, *, prefix: str = "figure") -> None:
 
 
 def test_enveloppe_de_pagination(client: Client) -> None:
-    """La liste renvoie l'enveloppe DRF, non plus un tableau brut.
+    """The list returns the DRF envelope, no longer a bare array.
 
-    Changement assumé du contrat de liste.
+    An accepted change of the list contract.
     """
     create_published_entity()
 
@@ -62,7 +62,7 @@ def test_enveloppe_de_pagination(client: Client) -> None:
 
 
 def test_collection_vide(client: Client) -> None:
-    """Sans fiche publiée, l'enveloppe reste présente et cohérente."""
+    """Without a published record, the envelope stays present and coherent."""
     create_entity(name="Brouillon", slug="brouillon")
 
     payload = client.get(LIST_URL).json()
@@ -71,7 +71,7 @@ def test_collection_vide(client: Client) -> None:
 
 
 def test_pagination_sur_plusieurs_pages(client: Client) -> None:
-    """Vingt fiches par page, et les liens de navigation suivent."""
+    """Twenty records per page, and the navigation links follow."""
     publish_many(45)
 
     premiere = client.get(LIST_URL).json()
@@ -90,7 +90,7 @@ def test_pagination_sur_plusieurs_pages(client: Client) -> None:
 
 
 def test_les_pages_ne_se_chevauchent_pas(client: Client) -> None:
-    """Les trois pages couvrent l'ensemble, sans doublon ni manque."""
+    """The three pages cover the whole set, with no duplicate and no gap."""
     publish_many(45)
 
     collectes: list[str] = []
@@ -103,7 +103,7 @@ def test_les_pages_ne_se_chevauchent_pas(client: Client) -> None:
 
 
 def test_page_inexistante_renvoie_404(client: Client) -> None:
-    """Comportement standard de DRF, conservé tel quel."""
+    """Standard DRF behaviour, kept as it is."""
     publish_many(3)
 
     response = client.get(LIST_URL, {"page": 99})
@@ -118,10 +118,10 @@ def test_page_invalide_renvoie_404(client: Client) -> None:
 
 
 def test_ordre_stable_avec_des_noms_egaux(client: Client) -> None:
-    """Deux figures homonymes gardent un ordre déterministe.
+    """Two homonymous figures keep a deterministic order.
 
-    `name` seul ne suffirait pas : l'`id` départage, sans quoi une fiche
-    pourrait changer de page d'une requête à l'autre.
+    `name` alone would not be enough: the `id` breaks the tie, without which
+    a record could move from one page to another between requests.
     """
     for index, entity_type in enumerate(
         [EntityType.DIVINITY, EntityType.HERO, EntityType.CREATURE]
@@ -139,7 +139,7 @@ def test_ordre_stable_avec_des_noms_egaux(client: Client) -> None:
 
 
 def test_les_parametres_sont_conserves_dans_les_liens(client: Client) -> None:
-    """Filtres et recherche survivent à la navigation entre pages."""
+    """Filters and search survive the navigation between pages."""
     publish_many(25, prefix="hero")
     for entity in Entity.objects.all():
         entity.entity_type = EntityType.HERO
@@ -172,7 +172,7 @@ def test_les_parametres_sont_conserves_dans_les_liens(client: Client) -> None:
 def test_recherche_dans_les_quatre_champs(
     client: Client, champ: str, valeur: str, terme: str
 ) -> None:
-    """La recherche couvre les quatre champs publics, sans casse."""
+    """The search covers the four public fields, case-insensitively."""
     champs: dict[str, str] = {"name": "Cible", "slug": "cible"}
     champs[champ] = valeur
     create_published_entity(**champs)
@@ -185,7 +185,7 @@ def test_recherche_dans_les_quatre_champs(
 
 
 def test_recherche_sans_resultat(client: Client) -> None:
-    """Aucun résultat donne une enveloppe vide, pas une erreur."""
+    """No result yields an empty envelope, not an error."""
     create_published_entity()
 
     payload = client.get(LIST_URL, {"search": "introuvable"}).json()
@@ -201,10 +201,10 @@ def test_recherche_vide_ne_filtre_pas(client: Client) -> None:
 
 
 def test_la_recherche_ignore_les_champs_non_publics(client: Client) -> None:
-    """Notes de revue, sources et fiches liées ne sont pas interrogées.
+    """Review notes, sources and linked records are not queried.
 
-    Une recherche ne doit pas devenir un chemin d'accès indirect vers des
-    données que l'API n'expose pas.
+    A search must not become an indirect path towards data the API does not
+    expose.
     """
     entity = create_published_entity(review_notes="motcledinterne")
     create_source(entity, label="motcledesource")
@@ -214,7 +214,7 @@ def test_la_recherche_ignore_les_champs_non_publics(client: Client) -> None:
 
 
 def test_la_recherche_ne_voit_pas_les_fiches_privees(client: Client) -> None:
-    """Les fiches non publiées restent hors des résultats **et** du compte."""
+    """Unpublished records stay out of the results **and** of the count."""
     create_entity(name="Anansi brouillon", slug="anansi-brouillon")
     supprimee = create_published_entity(name="Anansi supprimé", slug="anansi-supprime")
     supprimee.deleted_at = timezone.now()
@@ -249,7 +249,7 @@ def test_entity_type_vide_ne_filtre_pas(client: Client) -> None:
 
 
 def test_entity_type_inconnu_renvoie_400(client: Client) -> None:
-    """Un type hors des trois valeurs est une erreur d'appel."""
+    """A type outside the three values is a call error."""
     response = client.get(LIST_URL, {"entity_type": "titan"})
 
     assert response.status_code == 400
@@ -273,7 +273,7 @@ def test_filtre_country_sur_le_pays_principal(client: Client) -> None:
 
 
 def test_filtre_country_sur_un_pays_secondaire(client: Client) -> None:
-    """Le filtre couvre aussi les rattachements secondaires."""
+    """The filter also covers the secondary attachments."""
     benin = create_country(name="Benin", slug="benin", iso_code="BJ")
     entity = create_published_entity(name="Composite", slug="composite")
     entity.secondary_countries.add(benin)
@@ -284,7 +284,7 @@ def test_filtre_country_sur_un_pays_secondaire(client: Client) -> None:
 
 
 def test_filtre_country_est_insensible_a_la_casse(client: Client) -> None:
-    """Le code est normalisé en majuscules avant comparaison."""
+    """The code is normalised to upper case before comparison."""
     create_published_entity(
         name="Au Nigeria", slug="nigeria", primary_country=create_country()
     )
@@ -295,10 +295,10 @@ def test_filtre_country_est_insensible_a_la_casse(client: Client) -> None:
 def test_aucun_doublon_quand_les_deux_rattachements_correspondent(
     client: Client,
 ) -> None:
-    """Une fiche liée deux fois au même pays n'apparaît qu'une fois.
+    """A record linked twice to the same country appears only once.
 
-    Sans `distinct()`, la jointure multiple dupliquerait la ligne dans
-    `results` **et** gonflerait `count`.
+    Without `distinct()`, the multiple join would duplicate the row in
+    `results` **and** inflate `count`.
     """
     nigeria = create_country()
     entity = create_published_entity(
@@ -318,7 +318,7 @@ def test_aucun_doublon_quand_les_deux_rattachements_correspondent(
 
 
 def test_country_bien_forme_mais_absent_donne_une_liste_vide(client: Client) -> None:
-    """Un code inconnu ne révèle pas quels pays sont enregistrés."""
+    """An unknown code does not reveal which countries are recorded."""
     create_published_entity(primary_country=create_country())
 
     payload = client.get(LIST_URL, {"country": "ZZ"}).json()
@@ -369,10 +369,9 @@ def test_filtre_cultural_area_sur_une_aire_secondaire(client: Client) -> None:
 
 
 def test_filtre_cultural_area_inclut_les_descendants(client: Client) -> None:
-    """`central-africa` inclut une fiche rattachée à `congo-basin`.
+    """`central-africa` includes a record attached to `congo-basin`.
 
-    La hiérarchie est lue dans `parent`, sans qu'aucun nom de région soit
-    codé en dur.
+    The hierarchy is read from `parent`, with no region name hard-coded.
     """
     centrale = create_cultural_area(name="Central Africa", slug="central-africa")
     bassin = create_cultural_area(
@@ -388,7 +387,7 @@ def test_filtre_cultural_area_inclut_les_descendants(client: Client) -> None:
 
 
 def test_filtre_cultural_area_descend_sur_plusieurs_niveaux(client: Client) -> None:
-    """La traversée fonctionne à trois niveaux, et au-delà."""
+    """The traversal works at three levels, and beyond."""
     niveau1 = create_cultural_area(name="Level 1", slug="level-1")
     niveau2 = create_cultural_area(name="Level 2", slug="level-2", parent=niveau1)
     niveau3 = create_cultural_area(name="Level 3", slug="level-3", parent=niveau2)
@@ -403,7 +402,7 @@ def test_filtre_cultural_area_descend_sur_plusieurs_niveaux(client: Client) -> N
 
 
 def test_filtre_cultural_area_ne_remonte_pas_la_hierarchie(client: Client) -> None:
-    """Demander une sous-région n'inclut pas sa région parente."""
+    """Asking for a sub-region does not include its parent region."""
     centrale = create_cultural_area(name="Central Africa", slug="central-africa")
     bassin = create_cultural_area(
         name="Congo Basin", slug="congo-basin", parent=centrale
@@ -421,7 +420,7 @@ def test_filtre_cultural_area_ne_remonte_pas_la_hierarchie(client: Client) -> No
 
 
 def test_aucun_doublon_avec_une_aire_principale_et_secondaire(client: Client) -> None:
-    """Deux rattachements dans la même hiérarchie ne dupliquent pas la fiche."""
+    """Two attachments in the same hierarchy do not duplicate the record."""
     centrale = create_cultural_area(name="Central Africa", slug="central-africa")
     bassin = create_cultural_area(
         name="Congo Basin", slug="congo-basin", parent=centrale
@@ -442,7 +441,7 @@ def test_aucun_doublon_avec_une_aire_principale_et_secondaire(client: Client) ->
 
 
 def test_cultural_area_absente_donne_une_liste_vide(client: Client) -> None:
-    """Un slug inconnu ne produit ni erreur ni divulgation."""
+    """An unknown slug produces neither an error nor a disclosure."""
     create_published_entity(primary_cultural_area=create_cultural_area())
 
     payload = client.get(LIST_URL, {"cultural_area": "atlantide"}).json()
@@ -458,11 +457,11 @@ def test_cultural_area_vide_ne_filtre_pas(client: Client) -> None:
 
 
 def test_un_cycle_de_hierarchie_ne_boucle_pas() -> None:
-    """Un cycle accidentel dans `parent` ne provoque pas de boucle infinie.
+    """An accidental cycle in `parent` does not cause an infinite loop.
 
-    La contrainte de base interdit l'auto-parentage direct, mais pas un cycle
-    A → B → A. La traversée exclut les identifiants déjà vus, ce qui suffit
-    sans modifier le modèle.
+    The database constraint forbids direct self-parenting, but not a cycle
+    A to B to A. The traversal excludes the identifiers already seen, which
+    is enough without modifying the model.
     """
     a = create_cultural_area(name="Area A", slug="area-a")
     b = create_cultural_area(name="Area B", slug="area-b", parent=a)
@@ -475,7 +474,7 @@ def test_un_cycle_de_hierarchie_ne_boucle_pas() -> None:
 
 
 def test_aucun_pays_n_est_deduit_d_une_aire(client: Client) -> None:
-    """Filtrer par aire ne renseigne aucun pays : les filtres sont distincts."""
+    """Filtering by area infers no country: the filters stay distinct."""
     bassin = create_cultural_area(name="Congo Basin", slug="congo-basin")
     create_published_entity(
         name="Sans pays", slug="sans-pays", primary_cultural_area=bassin
@@ -493,7 +492,7 @@ def test_aucun_pays_n_est_deduit_d_une_aire(client: Client) -> None:
 
 
 def test_les_filtres_se_combinent_par_et(client: Client) -> None:
-    """Trois filtres et une recherche, tous appliqués simultanément."""
+    """Three filters and a search, all applied simultaneously."""
     nigeria = create_country()
     ouest = create_cultural_area()
     attendue = create_published_entity(
@@ -563,7 +562,7 @@ def test_une_combinaison_sans_correspondance_donne_une_liste_vide(
 
 
 def test_la_pagination_compte_apres_filtrage(client: Client) -> None:
-    """`count` ne compte que les fiches publiques correspondant aux filtres."""
+    """`count` counts only the public records matching the filters."""
     publish_many(25, prefix="hero")
     for entity in Entity.objects.all():
         entity.entity_type = EntityType.HERO
@@ -590,10 +589,10 @@ def test_la_pagination_compte_apres_filtrage(client: Client) -> None:
 def test_aucun_filtre_ne_divulgue_une_fiche_privee(
     client: Client, parametres: dict[str, str]
 ) -> None:
-    """Les fiches privées et supprimées restent hors des résultats et du compte.
+    """Private and deleted records stay out of the results and of the count.
 
-    La règle de visibilité s'applique **avant** les filtres : aucun paramètre
-    ne peut servir de contournement.
+    The visibility rule applies **before** the filters: no parameter can
+    serve as a bypass.
     """
     nigeria = create_country()
     ouest = create_cultural_area()
@@ -637,7 +636,7 @@ def test_aucun_filtre_ne_divulgue_une_fiche_privee(
 def test_les_parametres_de_liste_n_affectent_pas_le_detail(
     client: Client, parametres: dict[str, str]
 ) -> None:
-    """Le détail ne dépend que de la visibilité publique du slug demandé."""
+    """The detail depends only on the public visibility of the requested slug."""
     entity = create_published_entity(name="Shango", slug="shango")
 
     response = client.get(
@@ -649,7 +648,7 @@ def test_les_parametres_de_liste_n_affectent_pas_le_detail(
 
 
 def test_le_detail_n_est_pas_pagine(client: Client) -> None:
-    """La forme du détail est inchangée : pas d'enveloppe de pagination."""
+    """The shape of the detail is unchanged: no pagination envelope."""
     entity = create_published_entity()
 
     payload = client.get(reverse("entity-detail", kwargs={"slug": entity.slug})).json()
@@ -660,7 +659,7 @@ def test_le_detail_n_est_pas_pagine(client: Client) -> None:
 
 
 def test_l_endpoint_de_sante_est_inchange(client: Client) -> None:
-    """La santé ne prend ni pagination ni filtre."""
+    """Health takes neither pagination nor filter."""
     response = client.get(reverse("health"))
 
     assert response.status_code == 200
@@ -669,7 +668,7 @@ def test_l_endpoint_de_sante_est_inchange(client: Client) -> None:
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_les_ecritures_restent_refusees(client: Client, method: str) -> None:
-    """La navigation n'ouvre aucune écriture."""
+    """Navigation opens no write."""
     response = getattr(client, method)(LIST_URL, {"search": "x"})
 
     assert response.status_code == 405
@@ -682,10 +681,11 @@ def test_cout_de_la_liste_sans_filtre(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Deux requêtes : le comptage de la pagination, puis la page.
+    """Two queries: the pagination count, then the page.
 
-    Le coût ne dépend **pas** du nombre de fiches : la liste n'expose ni
-    profil, ni référentiel, ni relation, donc aucune requête par entité.
+    The cost does **not** depend on the number of records: the list exposes
+    neither profile, nor reference data, nor relation, hence no query per
+    entity.
     """
     publish_many(30)
 
@@ -697,12 +697,12 @@ def test_cout_de_la_liste_filtree_par_aire(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le filtre d'aire ajoute le coût de la traversée de la hiérarchie.
+    """The area filter adds the cost of traversing the hierarchy.
 
-    Décompte : 1 requête pour la racine de l'aire, puis 1 par niveau de
-    descendants — ici deux niveaux, dont le dernier vide —, puis le comptage
-    et la page. Ce coût dépend de la profondeur de la hiérarchie, jamais du
-    nombre de fiches.
+    Breakdown: 1 query for the root of the area, then 1 per level of
+    descendants - two levels here, the last one empty -, then the count and
+    the page. That cost depends on the depth of the hierarchy, never on the
+    number of records.
     """
     centrale = create_cultural_area(name="Central Africa", slug="central-africa")
     bassin = create_cultural_area(
@@ -725,7 +725,7 @@ def test_le_cout_ne_croit_pas_avec_le_nombre_de_fiches(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Même budget pour 5 et pour 30 fiches : aucune requête par entité."""
+    """Same budget for 5 and for 30 records: no query per entity."""
     publish_many(5)
     with django_assert_num_queries(2):
         client.get(LIST_URL)

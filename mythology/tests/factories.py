@@ -1,7 +1,7 @@
-"""Constructeurs d'objets pour les tests du domaine mythologique.
+"""Object builders for the tests of the mythological domain.
 
-Des fonctions nommées, pas une bibliothèque de factories : le modèle est
-encore petit et la phase 2 le fait encore évoluer.
+Named functions, not a factory library: the model is still small and
+phase 2 keeps making it evolve.
 """
 
 from typing import Any
@@ -33,7 +33,7 @@ def create_entity(
     gender: str = Gender.MALE,
     **extra: Any,
 ) -> Entity:
-    """Crée une entité valide, surchargeable champ par champ."""
+    """Create a valid entity, overridable field by field."""
     return Entity.objects.create(
         name=name,
         slug=slug,
@@ -44,21 +44,21 @@ def create_entity(
 
 
 def create_published_entity(**extra: Any) -> Entity:
-    """Crée une entité **publiée**, donc visible de l'API publique.
+    """Create a **published** entity, hence visible to the public API.
 
-    Factory distincte, et non changement du défaut de `create_entity` : le
-    statut par défaut du modèle reste `draft`, et les tests qui vérifient ce
-    défaut — modèles, service, import — doivent continuer de le constater.
-    Les tests de lecture publique publient donc explicitement.
+    A separate factory, rather than changing the default of `create_entity`:
+    the default status of the model stays `draft`, and the tests that check
+    that default - models, service, import - must keep observing it. Public
+    read tests therefore publish explicitly.
     """
     return create_entity(status=EntityStatus.PUBLISHED, **extra)
 
 
 def publish(entity: Entity) -> Entity:
-    """Publie une fiche déjà créée, dans la base de test uniquement.
+    """Publish an already created record, in the test database only.
 
-    Utile après un import, qui crée volontairement en `draft` : la lecture
-    publique ne peut être exercée qu'une fois la fiche publiée.
+    Useful after an import, which deliberately creates drafts: public reading
+    can only be exercised once the record is published.
     """
     entity.status = EntityStatus.PUBLISHED
     entity.save(update_fields=["status"])
@@ -66,27 +66,27 @@ def publish(entity: Entity) -> Entity:
 
 
 def create_divinity_profile(entity: Entity, **extra: Any) -> DivinityProfile:
-    """Crée un profil de divinité rattaché à `entity`."""
+    """Create a divinity profile attached to `entity`."""
     return DivinityProfile.objects.create(entity=entity, **extra)
 
 
 def create_hero(name: str = "Soundiata", slug: str = "soundiata") -> Entity:
-    """Crée une entité de type `hero`."""
+    """Create an entity of type `hero`."""
     return create_entity(name=name, slug=slug, entity_type=EntityType.HERO)
 
 
 def create_creature(name: str = "Mokele-mbembe", slug: str = "mokele-mbembe") -> Entity:
-    """Crée une entité de type `creature`."""
+    """Create an entity of type `creature`."""
     return create_entity(name=name, slug=slug, entity_type=EntityType.CREATURE)
 
 
 def create_hero_profile(entity: Entity, **extra: Any) -> HeroProfile:
-    """Crée un profil de héros rattaché à `entity`."""
+    """Create a hero profile attached to `entity`."""
     return HeroProfile.objects.create(entity=entity, **extra)
 
 
 def create_creature_profile(entity: Entity, **extra: Any) -> CreatureProfile:
-    """Crée un profil de créature rattaché à `entity`."""
+    """Create a creature profile attached to `entity`."""
     return CreatureProfile.objects.create(entity=entity, **extra)
 
 
@@ -96,7 +96,7 @@ def create_cultural_area(
     kind: str = CulturalAreaKind.AFRICAN_REGION,
     **extra: Any,
 ) -> CulturalArea:
-    """Crée une aire culturelle."""
+    """Create a cultural area."""
     return CulturalArea.objects.create(name=name, slug=slug, kind=kind, **extra)
 
 
@@ -106,7 +106,7 @@ def create_country(
     iso_code: str = "NG",
     **extra: Any,
 ) -> Country:
-    """Crée un pays."""
+    """Create a country."""
     return Country.objects.create(name=name, slug=slug, iso_code=iso_code, **extra)
 
 
@@ -115,7 +115,7 @@ def create_ethnicity(
     slug: str = "yoruba",
     **extra: Any,
 ) -> Ethnicity:
-    """Crée une ethnie."""
+    """Create an ethnicity."""
     return Ethnicity.objects.create(name=name, slug=slug, **extra)
 
 
@@ -124,7 +124,7 @@ def create_domain(
     slug: str = "thunder",
     **extra: Any,
 ) -> Domain:
-    """Crée un domaine."""
+    """Create a domain."""
     return Domain.objects.create(name=name, slug=slug, **extra)
 
 
@@ -134,11 +134,10 @@ def create_source(
     kind: str = SourceKind.BOOK,
     **extra: Any,
 ) -> Source:
-    """Crée une source documentaire **fictive** rattachée à `entity`.
+    """Create a **fictitious** documentary source attached to `entity`.
 
-    Les références employées par les tests sont inventées pour la
-    démonstration : aucune publication réelle n'est citée, et aucune n'est
-    attribuée au corpus.
+    The references used by the tests are invented for demonstration: no real
+    publication is cited, and none is attributed to the corpus.
     """
     return Source.objects.create(entity=entity, label=label, kind=kind, **extra)
 
@@ -150,10 +149,10 @@ def create_relation(
     to_name: str = "",
     **extra: Any,
 ) -> EntityRelation:
-    """Crée un lien sortant, vers une fiche ou vers un simple nom.
+    """Create an outgoing link, towards a record or towards a plain name.
 
-    Rappel du sens : `from_entity — kind → cible` se lit « la cible est un
-    `kind` de `from_entity` ».
+    Direction reminder: `from_entity - kind -> target` reads as the target is
+    a `kind` of `from_entity`.
     """
     return EntityRelation.objects.create(
         from_entity=from_entity,

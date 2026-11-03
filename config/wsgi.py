@@ -1,4 +1,4 @@
-"""Point d'entrée WSGI."""
+"""WSGI entry point."""
 
 import os
 

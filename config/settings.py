@@ -1,8 +1,8 @@
-"""Configuration Django du projet afrimyth-api.
+"""Django configuration of the afrimyth-api project.
 
-Toute la configuration sensible ou dépendante de l'environnement est lue dans
-les variables d'environnement. En développement, un fichier `.env` à la racine
-du dépôt est chargé automatiquement (voir `.env.example`).
+Every sensitive or environment-dependent setting is read from environment
+variables. In development, a `.env` file at the repository root is loaded
+automatically (see `.env.example`).
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ load_dotenv(BASE_DIR / ".env")
 
 
 def env(name: str, default: str | None = None) -> str:
-    """Retourne la variable d'environnement `name`.
+    """Return the `name` environment variable.
 
-    Lève `RuntimeError` si la variable est absente et sans valeur par défaut :
-    on préfère un démarrage impossible à une configuration silencieusement
-    incorrecte.
+    Raises `RuntimeError` when the variable is missing and has no default: a
+    start-up made impossible is preferable to a silently incorrect
+    configuration.
     """
     value = os.environ.get(name, default)
     if value is None:
@@ -331,7 +331,10 @@ SPECTACULAR_SETTINGS = {
         "completeness and classification are under editorial review and are "
         "not warranted by this API."
     ),
-    "VERSION": "0.1.0",
+    # Version de la **livraison**, reprise dans `info.version` du schéma. Elle
+    # ne versionne pas le contrat : les routes restent sous `/api/`, sans
+    # segment de version, et aucune négociation de version n'est exposée.
+    "VERSION": "1.0.0",
     # Le gabarit de drf-spectacular charge un script classique. ReDoc 3,
     # désormais servi par @latest, exige un module et laisse une page blanche.
     # Fixer une version 2 compatible évite les changements implicites du CDN.

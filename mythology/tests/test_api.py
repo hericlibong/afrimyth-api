@@ -63,14 +63,14 @@ INTERNAL_KEYS = {
 
 
 def published_hero(**extra: Any) -> Entity:
-    """Héros **publié**, donc lisible par l'API publique."""
+    """A **published** hero, hence readable by the public API."""
     return create_published_entity(
         name="Soundiata", slug="soundiata", entity_type=EntityType.HERO, **extra
     )
 
 
 def published_creature(**extra: Any) -> Entity:
-    """Créature **publiée**, donc lisible par l'API publique."""
+    """A **published** creature, hence readable by the public API."""
     return create_published_entity(
         name="Mokele-mbembe",
         slug="mokele-mbembe",
@@ -80,9 +80,10 @@ def published_creature(**extra: Any) -> Entity:
 
 
 def entity_entierement_reliee() -> Entity:
-    """Crée une entité rattachée à chacun des quatre référentiels.
+    """Create an entity attached to each of the four reference models.
 
-    Deux valeurs par collection permettent de vérifier le contenu des listes.
+    Two values per collection make it possible to check the content of the
+    lists.
     """
     entity = create_published_entity(
         primary_country=create_country(),
@@ -117,7 +118,7 @@ def entity_entierement_reliee() -> Entity:
 
 
 def test_liste_est_compacte_et_publique(client: Client) -> None:
-    """La collection est accessible sans authentification et reste compacte."""
+    """The collection is reachable without authentication and stays compact."""
     create_published_entity(
         name="Shango", slug="shango", category="Orisha of Lightning"
     )
@@ -133,7 +134,7 @@ def test_liste_est_compacte_et_publique(client: Client) -> None:
 
 
 def test_liste_n_expose_aucun_profil(client: Client) -> None:
-    """La collection reste compacte pour les trois types, profils exclus."""
+    """The collection stays compact for the three types, profiles excluded."""
     create_divinity_profile(create_published_entity())
     create_hero_profile(
         create_published_entity(
@@ -157,10 +158,10 @@ def test_liste_n_expose_aucun_profil(client: Client) -> None:
 
 
 def test_liste_n_expose_aucun_referentiel(client: Client) -> None:
-    """Le contrat de la collection est inchangé par l'ajout des référentiels.
+    """The list contract is unchanged by the addition of the reference models.
 
-    Non-régression : une entité entièrement rattachée ne doit pas élargir la
-    réponse de liste d'un seul champ.
+    Non-regression: a fully attached entity must not widen the list response
+    by a single field.
     """
     entity_entierement_reliee()
 
@@ -174,7 +175,7 @@ def test_liste_n_expose_aucun_referentiel(client: Client) -> None:
 
 
 def test_detail_expose_les_referentiels(client: Client) -> None:
-    """Le détail porte les sept clés de référentiel, objets et listes."""
+    """The detail carries the seven reference keys, objects and lists."""
     entity = entity_entierement_reliee()
 
     response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
@@ -210,7 +211,7 @@ def test_detail_expose_les_referentiels(client: Client) -> None:
 
 
 def test_detail_sans_referentiel(client: Client) -> None:
-    """Sans rattachement, les ancrages sont `null` et les listes vides."""
+    """Without attachment, the anchors are `null` and the lists empty."""
     entity = create_published_entity()
 
     response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
@@ -227,11 +228,11 @@ def test_detail_sans_referentiel(client: Client) -> None:
 
 
 def test_detail_n_imbrique_pas_le_graphe_des_referentiels(client: Client) -> None:
-    """Les représentations de référence restent plates.
+    """The reference representations stay flat.
 
-    Ni `parent`, ni `children`, ni le `primary_cultural_area` d'une ethnie ne
-    sont sérialisés : c'est ce qui évite des cascades de requêtes sans besoin
-    client établi.
+    Neither `parent`, nor `children`, nor the `primary_cultural_area` of an
+    ethnicity is serialised: that is what avoids cascades of queries without
+    an established client need.
     """
     parent = create_cultural_area(name="Africa", slug="africa")
     area = create_cultural_area(name="West Africa", slug="west-africa-2", parent=parent)
@@ -249,7 +250,7 @@ def test_detail_n_imbrique_pas_le_graphe_des_referentiels(client: Client) -> Non
 
 
 def test_liste_n_expose_ni_variante_ni_relations(client: Client) -> None:
-    """Le contrat de la collection reste strictement inchangé."""
+    """The list contract stays strictly unchanged."""
     reference = create_published_entity(name="Mami Wata", slug="mami-wata")
     variante = create_published_entity(
         name="Mami Wata (Caribbean)",
@@ -268,7 +269,7 @@ def test_liste_n_expose_ni_variante_ni_relations(client: Client) -> None:
 
 
 def test_detail_expose_la_figure_de_reference(client: Client) -> None:
-    """`variant_of` est une référence synthétique à quatre champs."""
+    """`variant_of` is a synthetic reference with four fields."""
     reference = create_published_entity(
         name="Mami Wata", slug="mami-wata", entity_type=EntityType.CREATURE
     )
@@ -290,7 +291,7 @@ def test_detail_expose_la_figure_de_reference(client: Client) -> None:
 
 
 def test_detail_sans_variante_ni_relation(client: Client) -> None:
-    """Sans lien : `variant_of` vaut `null` et `relations` est vide."""
+    """Without a link: `variant_of` is `null` and `relations` is empty."""
     entity = create_published_entity()
 
     response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
@@ -302,10 +303,10 @@ def test_detail_sans_variante_ni_relation(client: Client) -> None:
 
 
 def test_detail_expose_les_relations_sortantes(client: Client) -> None:
-    """Chaque relation porte `id`, `kind`, `to_entity`, `to_name`, `notes`.
+    """Each relation carries `id`, `kind`, `to_entity`, `to_name`, `notes`.
 
-    Une cible résolue conserve `to_name=""` ; une cible absente porte son nom
-    et `to_entity=null`.
+    A resolved target keeps an empty `to_name`; an absent target carries its
+    name and `to_entity=null`.
     """
     source = create_published_entity(name="Shango", slug="shango")
     cible = create_published_entity(name="Oranyan", slug="oranyan")
@@ -338,10 +339,10 @@ def test_detail_expose_les_relations_sortantes(client: Client) -> None:
 
 
 def test_detail_n_imbrique_pas_le_detail_des_cibles(client: Client) -> None:
-    """Les cibles restent synthétiques : aucune récursion possible.
+    """Targets stay synthetic: no recursion is possible.
 
-    Si la cible était sérialisée en détail, elle exposerait à son tour ses
-    propres `relations` et `variant_of`, et la réponse partirait en cascade.
+    If the target were serialised in detail, it would in turn expose its own
+    `relations` and `variant_of`, and the response would cascade.
     """
     source = create_published_entity(name="A", slug="a")
     cible = create_published_entity(name="B", slug="b", variant_of=source)
@@ -356,7 +357,7 @@ def test_detail_n_imbrique_pas_le_detail_des_cibles(client: Client) -> None:
 
 
 def test_detail_n_expose_pas_les_relations_entrantes(client: Client) -> None:
-    """Seules les relations sortantes figurent dans la réponse."""
+    """Only the outgoing relations appear in the response."""
     source = create_published_entity(name="A", slug="a")
     cible = create_published_entity(name="B", slug="b")
     create_relation(source, RelationKind.PARENT, to_entity=cible)
@@ -369,9 +370,9 @@ def test_detail_n_expose_pas_les_relations_entrantes(client: Client) -> None:
 
 
 def test_liste_n_expose_pas_les_sources(client: Client) -> None:
-    """Le contrat de la collection reste strictement inchangé.
+    """The list contract stays strictly unchanged.
 
-    Les références employées ici sont fictives.
+    The references used here are fictitious.
     """
     entity = create_published_entity()
     create_source(entity)
@@ -386,9 +387,9 @@ def test_liste_n_expose_pas_les_sources(client: Client) -> None:
 
 
 def test_detail_expose_les_sources(client: Client) -> None:
-    """Chaque source porte `id`, `label`, `kind`, `url`, `accessed_at`, `notes`.
+    """Each source carries `id`, `label`, `kind`, `url`, `accessed_at`, `notes`.
 
-    Les références employées ici sont fictives.
+    The references used here are fictitious.
     """
     entity = create_published_entity()
     create_source(
@@ -418,7 +419,7 @@ def test_detail_expose_les_sources(client: Client) -> None:
 
 
 def test_detail_sans_source(client: Client) -> None:
-    """Sans source, la clé est présente et vaut une liste vide."""
+    """Without a source, the key is present and holds an empty list."""
     entity = create_published_entity()
 
     response = client.get(reverse("entity-detail", kwargs={"slug": entity.slug}))
@@ -428,9 +429,9 @@ def test_detail_sans_source(client: Client) -> None:
 
 
 def test_detail_source_sans_url_ni_date(client: Client) -> None:
-    """Sans URL : `url=""`. Sans date : `accessed_at=null`.
+    """Without a URL: an empty `url`. Without a date: `accessed_at=null`.
 
-    Les références employées ici sont fictives.
+    The references used here are fictitious.
     """
     entity = create_published_entity()
     create_source(
@@ -448,9 +449,9 @@ def test_detail_source_sans_url_ni_date(client: Client) -> None:
 
 
 def test_detail_ordonne_les_sources(client: Client) -> None:
-    """L'ordre est déterministe : `label`, puis `id`.
+    """The order is deterministic: `label`, then `id`.
 
-    Les références employées ici sont fictives.
+    The references used here are fictitious.
     """
     entity = create_published_entity()
     create_source(entity, label="Zeta Fictional Review", kind=SourceKind.ARTICLE)
@@ -468,7 +469,7 @@ def test_detail_ordonne_les_sources(client: Client) -> None:
 
 
 def test_liste_ne_divulgue_aucun_champ_interne(client: Client) -> None:
-    """Aucun champ de plateforme ne fuit dans la collection."""
+    """No platform field leaks into the collection."""
     create_published_entity(review_notes="Private reviewer note.")
 
     response = client.get(reverse("entity-list"))
@@ -480,11 +481,11 @@ def test_liste_ne_divulgue_aucun_champ_interne(client: Client) -> None:
 
 
 def test_detail_ne_divulgue_aucun_champ_interne(client: Client) -> None:
-    """Ni compte, ni note de relecture, ni champ de suppression dans le détail.
+    """No account, no review note and no deletion field in the detail.
 
-    Les notes de relecture sont privées, et les comptes ne doivent pas
-    exposer d'identité. La vérification porte aussi sur la charge utile
-    brute, pour attraper une fuite même sous une autre clé.
+    Review notes are private, and accounts must not expose any identity. The
+    check also bears on the raw payload, in order to catch a leak even under
+    another key.
     """
     entity = create_published_entity(
         review_notes="Private reviewer note.",
@@ -501,10 +502,10 @@ def test_detail_ne_divulgue_aucun_champ_interne(client: Client) -> None:
 
 @pytest.mark.parametrize("status", EntityStatus.values)
 def test_seule_une_fiche_publiee_est_visible(client: Client, status: str) -> None:
-    """Seul `published` non supprimé apparaît ; les autres statuts donnent 404.
+    """Only a non-deleted `published` record appears; other statuses give 404.
 
-    Test paramétré sur les quatre statuts : `draft`, `submitted` et
-    `rejected` sont invisibles, `published` est visible.
+    A test parametrised over the four statuses: `draft`, `submitted` and
+    `rejected` are invisible, `published` is visible.
     """
     entity = create_entity(status=status)
     visible = status == EntityStatus.PUBLISHED
@@ -517,10 +518,10 @@ def test_seule_une_fiche_publiee_est_visible(client: Client, status: str) -> Non
 
 
 def test_fiche_supprimee_disparait_de_la_liste(client: Client) -> None:
-    """Une fiche marquée supprimée n'est plus listée.
+    """A record marked as deleted is no longer listed.
 
-    Le marquage est posé ici par l'ORM : c'est une préparation de test, pas
-    l'appel d'un service de suppression, qui n'existe pas encore.
+    The mark is set here through the ORM: this is a test preparation, not a
+    call to a deletion service, which does not exist yet.
     """
     visible = create_published_entity(name="Visible", slug="visible")
     supprimee = create_published_entity(name="Supprimée", slug="supprimee")
@@ -534,7 +535,7 @@ def test_fiche_supprimee_disparait_de_la_liste(client: Client) -> None:
 
 
 def test_detail_d_une_fiche_supprimee_renvoie_404(client: Client) -> None:
-    """L'URL d'une fiche supprimée logiquement renvoie 404."""
+    """The URL of a logically deleted record returns 404."""
     entity = create_published_entity()
     entity.deleted_at = timezone.now()
     entity.save()
@@ -547,11 +548,11 @@ def test_detail_d_une_fiche_supprimee_renvoie_404(client: Client) -> None:
 
 
 def test_cible_imbriquee_supprimee_est_masquee(client: Client) -> None:
-    """Une référence supprimée logiquement est masquée, pas exposée.
+    """A logically deleted reference is hidden, not exposed.
 
-    C'est le renversement de la limite constatée à l'incrément précédent :
-    `variant_of` devient `null` et le lien vers la cible supprimée disparaît
-    entièrement.
+    This reverses the limit observed in the previous increment: `variant_of`
+    becomes `null` and the link towards the deleted target disappears
+    entirely.
     """
     reference = create_published_entity(name="Référence", slug="reference")
     cible = create_published_entity(name="Cible", slug="cible")
@@ -578,10 +579,10 @@ def test_cible_imbriquee_supprimee_est_masquee(client: Client) -> None:
     [EntityStatus.DRAFT, EntityStatus.SUBMITTED, EntityStatus.REJECTED],
 )
 def test_variante_non_publiee_est_masquee(client: Client, status: str) -> None:
-    """`variant_of` vaut `null` si la référence n'est pas publiée.
+    """`variant_of` is `null` when the reference is not published.
 
-    Le contenu de la fiche source reste public : seule la référence est
-    masquée, sans révéler son identifiant, son slug, son nom ni son type.
+    The content of the source record stays public: only the reference is
+    hidden, without revealing its identifier, its slug, its name or its type.
     """
     reference = create_entity(
         name="Référence cachée", slug="reference-cachee", status=status
@@ -605,7 +606,7 @@ def test_variante_non_publiee_est_masquee(client: Client, status: str) -> None:
 
 
 def test_variante_publiee_est_exposee(client: Client) -> None:
-    """Une référence publiée reste exposée en objet synthétique."""
+    """A published reference stays exposed as a synthetic object."""
     reference = create_published_entity(
         name="Mami Wata", slug="mami-wata", entity_type=EntityType.CREATURE
     )
@@ -626,9 +627,9 @@ def test_variante_publiee_est_exposee(client: Client) -> None:
 def test_relations_melangees_seules_les_cibles_publiques_restent(
     client: Client,
 ) -> None:
-    """Cible publique conservée, privée et supprimée omises, nom non résolu gardé.
+    """Public target kept, private and deleted omitted, unresolved name kept.
 
-    Vérifie le JSON brut, et non une simple longueur de liste.
+    Checks the raw JSON, and not a mere list length.
     """
     source = create_published_entity(name="Shango", slug="shango")
     publique = create_published_entity(name="Oya", slug="oya")
@@ -662,10 +663,10 @@ def test_relations_melangees_seules_les_cibles_publiques_restent(
 
 
 def test_une_cible_masquee_ne_bascule_pas_en_to_name(client: Client) -> None:
-    """Un lien masqué n'est pas transformé en lien non résolu.
+    """A hidden link is not turned into an unresolved link.
 
-    Recopier le nom de la cible cachée dans `to_name` reviendrait à la
-    republier sous une autre forme.
+    Copying the name of the hidden target into `to_name` would amount to
+    republishing it in another form.
     """
     source = create_published_entity(name="Shango", slug="shango")
     cachee = create_entity(name="Cachée", slug="cachee", status=EntityStatus.SUBMITTED)
@@ -678,10 +679,10 @@ def test_une_cible_masquee_ne_bascule_pas_en_to_name(client: Client) -> None:
 
 
 def test_to_name_homonyme_d_une_fiche_privee_est_conserve(client: Client) -> None:
-    """Un `to_name` saisi reste exposé même si une fiche privée porte ce nom.
+    """An entered `to_name` stays exposed even if a private record bears that name.
 
-    Le lien est réellement non résolu : il n'est pas rapproché d'une fiche
-    privée homonyme, ni masqué à cause d'elle.
+    The link really is unresolved: it is neither matched with a homonymous
+    private record, nor hidden because of it.
     """
     create_entity(name="Yemaya", slug="yemaya")
     source = create_published_entity(name="Oya", slug="oya")
@@ -695,7 +696,7 @@ def test_to_name_homonyme_d_une_fiche_privee_est_conserve(client: Client) -> Non
 
 
 def test_detail_imbrique_le_profil_de_divinite(client: Client) -> None:
-    """Le détail expose les champs communs et le profil quand il existe."""
+    """The detail exposes the common fields and the profile when it exists."""
     entity = create_published_entity(
         name="Shango",
         slug="shango",
@@ -718,7 +719,7 @@ def test_detail_imbrique_le_profil_de_divinite(client: Client) -> None:
 
 
 def test_detail_imbrique_le_profil_de_heros(client: Client) -> None:
-    """Le détail d'un héros porte son profil, les deux autres restant `null`."""
+    """The detail of a hero carries its profile, the other two staying `null`."""
     hero = published_hero()
     create_hero_profile(
         hero,
@@ -741,7 +742,7 @@ def test_detail_imbrique_le_profil_de_heros(client: Client) -> None:
 
 
 def test_detail_imbrique_le_profil_de_creature(client: Client) -> None:
-    """Le détail d'une créature porte son profil, les deux autres `null`."""
+    """The detail of a creature carries its profile, the other two `null`."""
     creature = published_creature()
     create_creature_profile(
         creature,
@@ -764,7 +765,7 @@ def test_detail_imbrique_le_profil_de_creature(client: Client) -> None:
 
 
 def test_detail_sans_profil(client: Client) -> None:
-    """Sans profil, les trois clés sont présentes et toutes à `null`."""
+    """Without a profile, the three keys are present and all `null`."""
     create_published_entity(
         name="Soundiata", slug="soundiata", entity_type=EntityType.HERO
     )
@@ -778,7 +779,7 @@ def test_detail_sans_profil(client: Client) -> None:
 
 
 def test_threat_level_absent_est_null(client: Client) -> None:
-    """Un `threat_level` non renseigné est sérialisé en `null`, non en `""`."""
+    """An unset `threat_level` is serialised as `null`, not as an empty string."""
     creature = published_creature()
     create_creature_profile(creature)
 
@@ -791,16 +792,16 @@ def test_detail_a_un_cout_constant_quel_que_soit_le_type(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail coûte 7 requêtes pour chacun des trois types.
+    """The detail costs 7 queries for each of the three types.
 
-    Les trois profils, les trois ancrages principaux et la figure de
-    référence sont joints à la requête de l'entité par `select_related` ; les
-    six requêtes restantes sont celles des préchargements — quatre
-    collections de référentiels, les relations sortantes et les sources — que
-    Django exécute même lorsque les collections sont vides.
+    The three profiles, the three primary anchors and the reference figure
+    are joined to the entity query by `select_related`; the six remaining
+    queries are those of the prefetches - four reference collections, the
+    outgoing relations and the sources - which Django runs even when the
+    collections are empty.
 
-    Ce que le test protège : qu'aucun profil ne déclenche de requête
-    supplémentaire, et que le coût ne dépende pas du type de l'entité.
+    What this test protects: that no profile triggers an extra query, and
+    that the cost does not depend on the type of the entity.
     """
     divinity = create_published_entity()
     create_divinity_profile(divinity)
@@ -818,22 +819,22 @@ def test_detail_entierement_relie_ne_provoque_pas_de_n_plus_un(
     client: Client,
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le détail d'une entité entièrement rattachée coûte 7 requêtes.
+    """The detail of a fully attached entity costs 7 queries.
 
-    Décompte : 1 requête pour l'entité, qui ramène par `select_related` les
-    trois profils, les trois ancrages principaux et la figure de référence,
-    puis 1 requête par collection préchargée — pays, ethnies et aires
-    secondaires, domaines, relations sortantes et sources. Les trois
-    relations coûtent une seule requête, leur cible étant jointe dans le
-    `Prefetch` ; les deux sources en coûtent une également.
+    Breakdown: 1 query for the entity, which brings back through
+    `select_related` the three profiles, the three primary anchors and the
+    reference figure, then 1 query per prefetched collection - secondary
+    countries, ethnicities and areas, domains, outgoing relations and
+    sources. The three relations cost a single query, their target being
+    joined inside the `Prefetch`; the two sources cost one as well.
 
-    Ce test fixe le budget global de requêtes du détail. À lui seul, il ne
-    prouve pas le préchargement : une collection non préchargée demande aussi
-    une seule requête pour cette unique entité, quel que soit son contenu.
-    C'est `test_detail_precharge_se_serialise_sans_requete` qui apporte cette
-    preuve.
+    This test pins the overall query budget of the detail. On its own, it
+    does not prove the prefetching: a collection that is not prefetched also
+    needs a single query for that one entity, whatever its content. It is
+    `test_detail_precharge_se_serialise_sans_requete` that brings that
+    proof.
 
-    Les références documentaires employées ici sont fictives.
+    The documentary references used here are fictitious.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
@@ -858,15 +859,15 @@ def test_detail_entierement_relie_ne_provoque_pas_de_n_plus_un(
 def test_detail_precharge_se_serialise_sans_requete(
     django_assert_num_queries: Callable[[int], AbstractContextManager[None]],
 ) -> None:
-    """Le queryset de la vue fournit toutes les données au serializer.
+    """The queryset of the view supplies every piece of data to the serializer.
 
-    Retirer un préchargement provoque une requête pendant la sérialisation,
-    même si le budget global de l'endpoint reste identique. C'est donc ce
-    test, et non le budget, qui prouve la présence de chaque préchargement.
+    Removing a prefetch causes a query during serialisation, even if the
+    overall budget of the endpoint stays identical. It is therefore this
+    test, and not the budget, that proves the presence of each prefetch.
 
-    Le jeu couvre une figure de référence, deux relations résolues — dont les
-    cibles doivent elles aussi être jointes —, une cible absente et plusieurs
-    sources documentaires fictives.
+    The fixture covers a reference figure, two resolved relations - whose
+    targets must be joined as well -, an absent target and several
+    fictitious documentary sources.
     """
     entity = entity_entierement_reliee()
     create_divinity_profile(entity)
@@ -916,7 +917,7 @@ def test_slug_inconnu_renvoie_404(client: Client) -> None:
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_ecriture_refusee_sur_la_liste(client: Client, method: str) -> None:
-    """La collection est strictement en lecture seule."""
+    """The collection is strictly read-only."""
     response = getattr(client, method)(reverse("entity-list"))
 
     assert response.status_code == 405
@@ -924,7 +925,7 @@ def test_ecriture_refusee_sur_la_liste(client: Client, method: str) -> None:
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_ecriture_refusee_sur_le_detail(client: Client, method: str) -> None:
-    """Le détail est strictement en lecture seule."""
+    """The detail is strictly read-only."""
     entity = create_published_entity()
 
     response = getattr(client, method)(
