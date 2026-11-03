@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](docs/installation.md)
 [![Django](https://img.shields.io/badge/Django-5.2-092E20)](docs/development.md)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/hericlibong/afrimyth-api/tree/v1.0.0)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Afrimyth is a cultural project with an encyclopedic purpose. It documents
 divinities, heroes and creatures from African and diasporic mythologies,
@@ -61,3 +62,9 @@ supplied separately. To explore the API with your own example, follow the
 | [Corpus import](docs/corpus-import.md) | Import options, data mapping and limitations |
 | [Architecture and checks](docs/development.md) | Project layout, OpenAPI, tests, coverage and CI |
 | [Project status](docs/project-status.md) | Delivery history, release version and known limits |
+
+## Licensing
+
+The API code and software documentation are available under the [MIT License](LICENSE).
+The mythological corpus, including its records, descriptions and editorial
+content, is outside that grant. Its license remains to be determined.
