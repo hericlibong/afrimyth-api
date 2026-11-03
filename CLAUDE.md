@@ -89,7 +89,17 @@ docs/reports/  Rapport d'intervention, un fichier par incrément
 
 ## Hors périmètre à ce stade
 
-CI et couverture.
+**CI et couverture.** Autorisées depuis l'incrément 2 de la phase 6, dans ce
+périmètre : `pytest-cov`, la configuration de couverture de `pyproject.toml`
+— trois paquets applicatifs mesurés, tests et migrations exclus, seuil
+`fail_under` — et **un seul** workflow GitHub Actions,
+`.github/workflows/ci.yml`, sur les pull requests et les pushes vers `main`.
+Un environnement unique : Python 3.12 et un service PostgreSQL 16 aux
+identifiants éphémères, sans fichier `.env` réel, sans corpus V2, sans Docker
+Desktop et sans la base locale. Restent hors périmètre toute matrice de
+versions, tout service de CI supplémentaire, la publication d'artefacts ou de
+badges, le téléversement de la couverture vers un service externe et tout
+déploiement automatique.
 
 **Docker.** Autorisé depuis l'incrément 1 de la phase 6, pour le seul
 démarrage local : `Dockerfile`, `docker-compose.yml`, `.dockerignore` et

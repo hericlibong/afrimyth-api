@@ -1,0 +1,99 @@
+# Intégration continue : un seul environnement, sans matrice ni service
+# supplémentaire. Les contrôles sont ceux déjà employés localement, avec
+# leurs configurations de `pyproject.toml` — la CI ne redéfinit aucune règle.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Permissions minimales : le workflow lit le dépôt et n'écrit rien.
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # PostgreSQL 16, la version employée par le projet.
+        image: postgres:16
+        env:
+          # Identifiants réservés à cette base éphémère, détruite avec le
+          # runner. Ils ne valent que pour la CI et ne sont partagés avec
+          # aucune installation locale.
+          POSTGRES_DB: afrimyth_ci
+          POSTGRES_USER: afrimyth_ci
+          POSTGRES_PASSWORD: afrimyth_ci_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      # Variables fournies directement au job : aucun fichier `.env` réel
+      # n'existe sur le runner, et `load_dotenv()` n'y trouve donc rien à
+      # charger. Le job ne dépend ni du corpus V2, ni de Docker Desktop, ni
+      # de la base PostgreSQL de la machine de développement.
+      DJANGO_SECRET_KEY: ci-only-insecure-key-not-used-anywhere-else
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      POSTGRES_DB: afrimyth_ci
+      POSTGRES_USER: afrimyth_ci
+      POSTGRES_PASSWORD: afrimyth_ci_password
+      # Le job s'exécute sur le runner, pas dans un conteneur : le service
+      # est joignable sur le port publié de l'hôte.
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          # Les deux fichiers : `requirements-dev.txt` inclut l'autre par
+          # `-r`, mais son empreinte seule ne verrait pas changer la base.
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Chaque contrôle est une étape distincte : en cas d'échec, le journal
+      # désigne immédiatement lequel. Aucun `continue-on-error` — le premier
+      # échec arrête le job et fait échouer la CI.
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format)
+        run: ruff format --check .
+
+      - name: mypy
+        run: mypy .
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: No missing migration
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: OpenAPI schema validation
+        # Le schéma est écrit hors du dépôt : la CI valide, elle ne produit
+        # pas d'artefact versionné.
+        run: python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
+
+      - name: Tests with coverage
+        # Le seuil vit dans `[tool.coverage.report]` de `pyproject.toml` :
+        # une seule valeur, locale et distante.
+        run: pytest --cov --cov-report=term-missing

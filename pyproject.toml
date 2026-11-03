@@ -14,6 +14,37 @@ testpaths = ["tests", "accounts", "mythology"]
 addopts = "-ra --strict-markers"
 
 # ---------------------------------------------------------------------------
+# Couverture
+# ---------------------------------------------------------------------------
+# `--cov` n'est volontairement pas dans `addopts` : mesurer la couverture
+# ralentit chaque exécution, alors que le travail courant lance des tests
+# ciblés. La commande complète est documentée dans le README.
+
+[tool.coverage.run]
+# Les trois paquets applicatifs, nommés explicitement : mesurer `.` ferait
+# entrer le dépôt entier dans le dénominateur.
+source = ["accounts", "config", "mythology"]
+# Couverture de branches, et pas seulement de lignes : un `if` dont une seule
+# issue est exercée doit se voir.
+branch = true
+omit = [
+    # Les tests ne se mesurent pas eux-mêmes.
+    "*/tests/*",
+    # Code généré, rejoué à chaque création de base de test : le compter
+    # gonflerait la mesure sans rien garantir.
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+# Seuil fixé d'après la mesure initiale — 98,20 % de lignes et de branches
+# sur les trois paquets applicatifs — avec une marge délibérée de 3,2 points.
+# Elle absorbe les variations ordinaires d'un remaniement sans rendre la CI
+# rouge pour du bruit, tout en arrêtant une vraie régression. Sa
+# justification est dans `docs/reports/phase-6-increment-2-ci-couverture.md`.
+fail_under = 95
+
+# ---------------------------------------------------------------------------
 # Ruff
 # ---------------------------------------------------------------------------
 [tool.ruff]

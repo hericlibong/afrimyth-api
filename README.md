@@ -991,6 +991,32 @@ ruff format --check .  # formatting
 mypy .                 # type checking
 ```
 
+### Coverage
+
+Coverage is not measured on every run, because day-to-day work runs targeted
+tests. Measure it explicitly:
+
+```bash
+pytest --cov --cov-report=term-missing
+```
+
+The measured scope is the three application packages — `accounts`, `config`
+and `mythology` — with tests and migrations excluded. Branch coverage is on,
+so a conditional with only one exercised outcome counts as partial. The
+minimum is `fail_under` in `pyproject.toml`: the command fails below it.
+
+### Continuous integration
+
+One GitHub Actions workflow, `.github/workflows/ci.yml`, runs on pull
+requests and on pushes to `main`. It uses a single environment — Python 3.12
+and a PostgreSQL 16 service container with throwaway credentials — and reads
+no `.env` file, no V2 corpus and no local database. It runs the same checks
+as above, each as its own step, and fails on the first one that fails:
+
+`ruff check` · `ruff format --check` · `mypy` · `manage.py check` ·
+`makemigrations --check --dry-run` ·
+`spectacular --validate --fail-on-warn` · `pytest --cov`
+
 ## Project status
 
 Phase 2 completed: the domain model has been exercised through a three-entity
